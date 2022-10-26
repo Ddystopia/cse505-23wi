@@ -1,0 +1,4 @@
+.lia.cache
+
+# uncomment to ignore vscode stuff (e.g., user spellings)
+#.vscode/
