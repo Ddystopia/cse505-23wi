@@ -1,0 +1,144 @@
+$max-width: 52em;
+$font-size: 12pt;
+$purple: #4B2E83;
+$gray: #1F262B;
+$lightgray: #dddddd;
+
+html {
+    font-family: "Libre Franklin", Helvetica, Arial, sans-serif;
+    font-weight: 300;
+    font-size: $font-size;
+    line-height: 1.35;
+    color: $gray;
+    text-rendering: optimizeLegibility;
+}
+
+body {
+    margin: 0 auto;
+    padding: 1em;
+    max-width: $max-width;
+}
+
+b, strong, h1, h2, h3, h4 {
+    font-weight: 600;
+}
+
+pre, code {
+    font-size: $font-size - 1;
+    font-family: "Inconsolata", Consolas, Menlo, monospace;
+    font-weight: 400;
+}
+
+pre {
+    padding: 0.5em;
+    overflow-y: auto;
+}
+
+h1, h2, h3, h4 {
+    margin: 0.4em 0;
+}
+h1, h2 {
+    margin-top: 1.0em;
+}
+h3 {
+    margin-top: 0.8em;
+}
+h1 {
+    font-size: 160%;
+}
+h2 {
+    font-size: 130%;
+}
+h3 {
+    font-size: 117%;
+}
+h4 {
+    font-size: 104%;
+}
+
+a {
+    color: $purple;
+    text-decoration: none;
+    &:hover {
+        color: scale-color($purple, $lightness: -50%);
+    }
+}
+
+header {
+    h1 {
+        margin-top: 0;
+
+        span.quarter {
+            font-size: $font-size;
+            font-weight: 300;
+        }
+    }
+    nav {
+        border-bottom: 1px solid $lightgray;
+        border-top: 1px solid $lightgray;
+        padding: 5px 0px;
+
+        p {
+            display: inline-block;
+            margin: 0 1em 0 0;
+        }
+    }
+}
+
+main {
+    a {
+        font-weight: 600;
+    }
+}
+
+footer {
+    $base-color: scale-color($gray, $lightness: +60%);
+
+    color: $base-color;
+    font-size: 10pt;
+
+    a {
+        color: $base-color;
+        &:hover {
+            color: scale-color($base-color, $lightness: -30%);
+        }
+    }
+}
+
+@mixin box($color) {
+    margin: 0.4em auto;
+    padding: 0.5em;
+    background: scale-color($color, $saturation: -20%, $lightness: 80%);
+    border: 1px solid $color;
+}
+
+div.notice {
+    @include box($purple);
+}
+
+div.toc {
+    @include box($lightgray);
+
+    h3 {
+        margin-top: 0;
+    }
+
+    ul, ol {
+        margin-top: 0;
+        margin-bottom: 0;
+    }
+}
+
+@media print {
+    nav {
+        display: none;
+    }
+
+    footer {
+        display: none;
+    }
+
+    html {
+        font-size: 10pt;
+    }
+}

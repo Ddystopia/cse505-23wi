@@ -1,0 +1,11 @@
+title = "CSE 505: Programming Languages"
+base_url = "https://courses.cs.washington.edu/courses/cse505/23wi/notes"
+compile_sass = true
+build_search_index = false
+
+[markdown]
+highlight_code = true
+highlight_theme = "cheerfully-light"
+
+[extra]
+quarter = "Winter 2023"

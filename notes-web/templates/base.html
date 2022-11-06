@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+
+    {% set page_title = page.title | default(value=section.title | default(value="")) %}
+    <title>{% if page_title %}{{ page_title }} — {% endif %}{{ config.title }}</title>
+
+    <link rel="preconnect" href="https://fonts.gstatic.com">
+    <link href="https://fonts.googleapis.com/css2?family=Libre+Franklin:ital,wght@0,300;0,600;1,300;1,600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inconsolata:wght@400;600&display=swap" rel="stylesheet"> 
+    <link href="{{ get_url(path="main.css") | safe }}" rel="stylesheet">
+
+    <script type="text/javascript">
+    MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\\(', '\\)']]
+        },
+        startup: {
+            ready: function() {
+                MathJax.startup.defaultReady();
+                const {DelimiterMap} = MathJax._.input.tex.SymbolMap;
+                const {Symbol} = MathJax._.input.tex.Symbol;
+                const {MapHandler} = MathJax._.input.tex.MapHandler;
+                const delimiter = MapHandler.getMap('delimiter');
+                delimiter.add('\\lBrack', new Symbol('\\lBrack', '\u27E6'));
+            }
+        }
+    }
+    </script>
+    <script type="text/javascript" id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+</script>
+</head>
+<body>
+    <header>
+        <h1>
+            <a href="{{ get_url(path="") | safe }}">{{ config.title }}</a>
+            <span class="quarter">{{ config.extra.quarter }}</span>
+        </h1>
+        <nav>
+            {% set pages = get_section(path="_index.md") %}
+            {% set sorted_pages = pages.pages | sort(attribute="title") %}
+            {% for page in sorted_pages %}
+            <p><a href="{{ page.permalink | safe }}">{{ page.title }}</a></p>
+            {% endfor %}
+        </nav>
+    </header>
+    <main>
+        {% block main %}
+        Hello, world!
+        {% endblock main %}
+    </main>
+</body>
+</html>

@@ -1,0 +1,5 @@
+{% extends "base.html" %}
+{% import "macros.html" as macros %}
+{% block main %}
+{{ macros::prepare_content(resource=section) }}
+{% endblock main %}
