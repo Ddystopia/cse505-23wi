@@ -2,8 +2,11 @@
 title = "Week 02 - More Functional Programming: Lists and Trees"
 +++
 
-
 # Week 02 - More Functional Programming: Lists and Trees
+
+_These notes were written primarily by Prof. James Bornholt for his course at
+UT Austin. James is a PhD alum of UW and "friend of the channel", and we thank
+him for permission to reuse and adapt these notes back at UW!_
 
 ### Some other ADTs
 

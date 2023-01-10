@@ -4,7 +4,7 @@ title = "Week 01 - Functional Programming and Proofs: Inductive Types and Recurs
 
 # Week 01 - Functional Programming and Proofs: Inductive Types and Recursive Functions
 
-_These notes were written by primarily by Prof. James Bornholt for his course at
+_These notes were written primarily by Prof. James Bornholt for his course at
 UT Austin. James is a PhD alum of UW and "friend of the channel", and we thank
 him for permission to reuse and adapt these notes back at UW!_
 
