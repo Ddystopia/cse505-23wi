@@ -1,417 +1,357 @@
 +++
-title = "Week 08 - System F: Polymorphism"
+title = "Week 08 - Simply Typed Lambda Calculus (STLC): Type Safety"
 +++
 
-# Week 08 - System F: Polymorphism
+# Week 08 - Simply Typed Lambda Calculus (STLC): Type Safety
 
 _These notes were written by primarily by Prof. James Bornholt for his course at
 UT Austin. James is a PhD alum of UW and "friend of the channel", and we thank
 him for permission to reuse and adapt these notes back at UW!_
 
-In [Week 07](@/notes/week07/_index.md) we saw how the simply typed lambda calculus,
-and type systems in general,
-can be powerful tools for guaranteeing safety properties about programs.
-Robin Milner tells us that "well typed programs cannot go wrong",
-and in the case of the lambda calculus,
-that meant that we could *statically* guarantee that a program could evaluate successfully.
-
-While the simply typed lambda calculus is powerful,
-its type system—and the generalization of it to a real functional programming language—can often be inconvenient.
-Consider this combinator that applies a function to an argument twice:
+At the end of [Week 07](@/notes/week07/_index.md) we tried our hand at "baking in"
+booleans into the lambda calculus, to try to ease the pain of writing everything using Church encodings.
+This seemed like a natural evolution of the pure calculus,
+but in fact created a big problem:
+we were able to write well-formed terms that "got stuck",
+in the sense that they were not values but could not be reduced further.
+For example, this term:
 ```
-double = λf. λx. f (f x)
+true (λx. x)
 ```
-What type should `double` have?
-In some sense, `double` is "generic";
-as long as `f` is an abstraction that both takes as input and returns the same type that `x` has,
-`double` will be well typed.
-But our type systems thus far have had no way to express this idea of being "generic".
-
-In this lecture we'll introduce the idea of *polymorphism*,
-a type system feature that allows a single piece of code to be used with multiple types.
-We'll see a few ad-hoc examples to build some intuition,
-and then introduce a particular polymorphic type system called *System F*
-for the lambda calculus.
-
-## Type variables
-
-Let's consider `double` more concretely:
+is not a value—it's an application—but cannot step further, as none of the (call-by-value) reduction rules apply.
+The same problem would appear if we tried to bake natural numbers into the core calculus;
+a term like:
 ```
-double = λf. λx. f (f x)
+7 + (λx. x)
 ```
-We can copy and paste this definition each time we want to use it with a different type, like this
-(imagining that we've extended the simply typed lambda calculus with `Nat`s,
-which we didn't cover in [Week 07](@/notes/week07/_index.md) but follows the same idea as with `Bool`):
+is syntactically well-formed but cannot step and is not a value.
+
+You might recognize this sort of problem from your prior programming experience.
+It's the sort of thing we'd call a "type error".
+Informally, a term like `7 + (λx. x)` is trying to add things "of the wrong type",
+and that should be considered an error in the program,
+ideally an error we detect at compile time.
+In other words, this program should somehow be "invalid".
+
+In this lecture, we'll formalize this idea of only some programs being "valid"
+by designing a *type system* for the (extended) lambda calculus.
+A type system will assign a *type* to terms in the lambda calculus,
+and we'll aim to design our type system to satisfy a simple *safety* property
+that [Robin Milner](https://en.wikipedia.org/wiki/Robin_Milner) phrased better than I could:
+
+> Well-typed programs cannot "go wrong".
+
+In other words, if we can assign a type to a lambda calculus term,
+that is a guarantee that the term will not get stuck.
+Terms like the ones we've written above will be untypable—there will be no type we can assign them.
+
+## Some first attempts at types
+
+Our goal is to write down a type system that prevents programs from getting stuck;
+in other words, our type system should ensure programs eventually reduce to a value.
+Moreover, we'd like our type system to do this *statically*—it should be able to
+rule out stuck programs *without running them*.
+One of the key takeaways from the simply typed lambda calculus
+is that we can define a type system using the same tools we've been using all semester—we'll
+essentially write down a *syntax* of types, and a *semantics* of those types.
+
+Let's start with the syntax of types—what types will our system have?
+Roughly speaking, our lambda calculus (extended with booleans) has two kinds of values:
+`bool`s (`true` or `false`) and abstractions.
+So a first rough attempt at defining the possible types for lambda calculus terms
+might just assign every value one of two types:
 ```
-doubleBool = λf:(Bool -> Bool). λx:Bool. f (f x)
-doubleNat = λf:(Nat -> Nat). λx:Nat. f (f x)
+T := bool
+   | ->
 ```
-But this is a bit frustrating!
-It's also not great as a software engineering practice:
-it's just one piece of code,
-but repeated multiple times,
-which suggests we are missing some kind of abstraction.
-
-One intuitive idea for solving this problem
-is to have some notion of a *type variable*.
-We could then define `double` like this:
+In other words, a type is either `bool` or `->`, with the understanding that we'd use `->` for any
+abstraction and `bool` for any boolean. But this analysis is too conservative and not super helpful;
+for example, it assigns the same type `->` to the two terms:
 ```
-double = λf:(T -> T). λx:T. f (f x)
+λx. true
+λx. λy. false
 ```
-But this doesn't quite work either. Consider this code:
-```
-if (double not true) then (double succ 1) else (double succ 2)
-```
-Is this expression well typed?
-Certainly it appears that way on the surface:
-`not` has type `Bool -> Bool` and `true` has type `Bool`,
-while `succ` has type `Nat -> Nat` and `1` and `2` have type `Nat`.
-But the two uses of `double` *conflict*:
-the first one requires that `T` must be `Bool`,
-while the second requires that `T` must be `Nat`.
+even though they're clearly quite different—the first takes any input and immediately returns a boolean,
+while the second takes any input and returns *another function*. So just by looking at these types,
+we can't tell what the result of applying these two functions will be!
 
-What's missing from our idea of type variables
-is some way to *separate* them—to soundly instantiate them multiple times
-within the same program.
-Now, intuitively, this is not really a difficult idea:
-we somehow want "each use" of `T` to be allowed to be different,
-and as long as they are "locally" correct
-it's fine to give `T` a different value at each position.
-But implementing this idea turns out to be extremely challenging.
-In fact, people have gotten it wrong:
-Java's type system was [recently discovered to be incorrect](https://io.livecode.ch/learn/namin/unsound)
-in exactly this way.
-
-As PL people, we know that the answer to getting these sorts of problems right
-is to formalize what seems "obvious".
-Rather than this hand-waving notion of "type variables",
-we need a formal notion of *polymorphism*.
-
-## Varieties of polymorphism
-
-There are actually quite a few different ideas bottled up into the same word "polymorphism":
-* The idea we're going to study today is *parametric polymorphism*.
-  This allows a single piece of code to have a "generic" type using type variables.
-  The key feature of parametric polymorphism is that all instances of the generic piece of code
-  have the *same* behavior, regardless of type.
-  In the case of `double`, the function always does the same thing,
-  it just does it to different types of values.
-  You've seen parametric polymorphism before
-  as *generic functions* in Java (also ML).
-    * In particular, in this lecture we'll see a style of parametric polymorphism
-      known as *impredicative* or *first-class* polymorphism.
-    * There is also a more limited style of parametric polymorphism
-      known as *let-polymorphism* or *ML-style* polymorphism.
-      These restrict *where* type variables and generic functions can appear in a term,
-      and in return get a simpler and decidable algorithm for type inference.
-* Another form of polymorphism is *ad-hoc polymorphism*,
-  which allows the same *name* to be used to refer to different functions.
-  This *appears* to be polymorphism to the programmer,
-  but in reality,
-  it's just a dispatch mechanism:
-  the types are used to select (either at compile time or run time)
-  which of the different functions to invoke.
-  An example of ad-hoc polymorphism you've probably seen before 
-  is *operator overloading* in C++ or Python:
-  the `+` operator, for example, is just one "name",
-  but there can be many different implementations of it,
-  and the types are used to decide which implementation to execute.
-* Object-oriented languages often have a notion of *subtype polymorphism*,
-  which allows a single term to masquerade as multiple different types
-  that are related by some kind of *subtyping* relation.
-  Subtype polymorphism is what allows us to talk about "subclasses" (like `Cat`s)
-  and pass them around as if they were their superclass (like `Animal`).
-
-These notions are easy to confuse with each other,
-and often we (somewhat inaccurately) say "polymorphism" to mean any or all of these ideas.
-For example, Java has always had subtype polymorphism (through classes and inheritance),
-and ad-hoc polymorphism (through method overloading),
-but did not have parametric polymorphism (generics) at release;
-those came later.
-
-In the `double` example above,
-what we were really looking for was *parametric* polymorphism—we wanted to be able to use the *same*
-`double` code with multiple different (unrelated) types.
-So that's what we'll study today.
-
-## System F
-
-System F is a parametrically polymorphic type system for the lambda calculus,
-first discovered by Jean-Yves Girard in 1972,
-and somewhat contemporaneously by John Reynolds in 1974.
-In the same way that the lambda calculus is the essence of computation,
-and the simply typed lambda calculus is the essence of type systems,
-so to is System F the essence of parametric polymorphism.
-It's a convenient vehicle for studying more complex polymorphism,
-and also the basis for numerous programming language designs.
-
-The big idea is to *abstract out* the type of a term,
-and then *instantiate* the abstract term with concrete type annotations once we have them.
-We're going to bake this abstraction and instantiation *into the language itself*—we will be
-adding new constructs not just to the type system but to the lambda calculus itself.
-We'll do this in three parts:
-first, we'll add new polymorphic types to the type system syntax,
-then we'll add new polymorphic terms to the lambda calculus syntax and semantics,
-and then finally we'll add polymorphic typing rules to the type system semantics.
-
-### Polymorphic types
-
-We can start by defining some new *polymorphic types* in our type system.
-We'll keep the same `Bool` and `->` constructors from [Week 07](@/notes/week07/_index.md),
-but add two new constructors:
+To give a useful type to an application, then,
+we need some way oto know what type the function being applied returns.
+We also need to know that the function will do the right thing with the argument we pass in,
+so somehow we also need to talk about the type of the argument.
+These requirements hint at a slightly richer type system that is inductive:
 ```
 T := bool
    | T -> T
-   | α
-   | ∀α. T
 ```
-Here, `α` is a *type variable*.
-The two new constructors give us a way to talk about *generic types*.
-For example, here's (almost; see the next section) the type of a generic identity function:
-```
-∀α. α -> α
-```
-We can read this as saying that for any type `α`, we can get a function that takes as input
-something of type α and returns something of type α.
-Similarly, here's (almost) a generic type for our `double` function from before:
-```
-∀α. (α -> α) -> α -> α
-```
-For any type `α`, it takes as input a function on `α`s
-and a base `α` and returns another `α`.
+Here, the function type `T -> T` records both the type of the input (before the arrow)
+and the type of the result (after the arrow).
+The lambda calculus only has single-argument abstractions,
+so this is all we need,
+but we can compose the `->` constructor to get more complex functions.
+For example, `T1 -> (T2 -> T3)` is the type of a function that takes as input a `T1`
+and returns *a function* that takes as input a `T2` and returns a `T3`.
 
-### Type abstractions and applications
+That's the syntax of our type system,
+so let's turn to the "semantics".
+How do we know when a term `t` has a type `T`?
+We'll formalize this idea by writing down a *typing relation*
+or *typing judgment* that relates terms to their types.
+Let's try writing this relation as a binary relation $t : T$,
+pronounced "term $t$ has type $T$".
+For example, $\texttt{true} : \texttt{bool}$
+is (axiomatically) a member of the typing relation.
 
-Recall that in the lambda calculus we called functions like `λx. t` *abstractions*.
-The idea was that the function *abstracts* a term `t` to work for *any* `x`,
-and we can get back the term `t` for a specific `x` by *applying* it.
-In parametric polymorphism, we similarly want some idea of *abstracting* out the type of a term,
-and *applying* the resulting abstraction to get back the concrete term.
-We're therefore going to add *type abstractions* and *type applications* to our lambda calculus.
+While this simple relation works for booleans,
+we'll run into trouble if we try it for functions.
+Here's the problem: consider the term `λx. x`.
+What type does this function have?
+Intuitively, its type depends on the input we pass it—if the input has type `bool`,
+then the output also has type `bool`;
+if the input has type `bool -> bool` then so does the output.
+Your programmer brain might be shouting "generics!" at this point;
+we'll talk in a couple of lectures about how to give this function a generic type.
+For now, though, we need to give this function a *concrete* type,
+and that concrete type is going to depend on what the type of the input is.
 
-Let's start with the syntax, which adds two new constructors for lambda calculus terms:
-```
-t := x
-   | λx:T. t
-   | t t
-   | true
-   | false
-   | if t then t else t
-   | Λα. t
-   | t T
-```
-The first new constructor is the *type abstraction* `Λα. t`.
-Type abstractions take as input a *type*
-and have a *term* as their body.
-The second constructor is *type application* or *type instantiation*,
-which *applies* a type abstraction
-to get back a concrete term `t` in which
-the type variable has been instantiated with the given type `T`.
+So first, we need to somehow know the type of the argument to a function.
+In general, there are two approaches here—either we explicitly annotate the abstraction
+with the type of its argument,
+or else somehow we analyze the abstraction to deduce what type its input must have.
+For now, we'll choose the first approach,
+although we'll study the second later in the semester.
+We're going to start writing abstractions as `λx:T. t`
+where `T` is the *type* of the input.
 
-With this syntax,
-we can *actually* write generic functions.
-For example, this term is the generic identity function:
-```
-id = Λα. λx:α. x
-```
-To *use* this identity function,
-we first have to *instantiate* it with a concrete type.
-For example, the identity function for `Bool`s is `id Bool`.
-The term `id` has type `∀α. α -> α`,
-while the term `id Bool` has type `Bool -> Bool`.
-Similarly, we can now write the generic `double` function:
-```
-double = Λα. λf. λx. f (f x)
-```
-which has type `∀α. (α -> α) -> α -> α`.
-As a concrete instantiation,
-`double Nat` has type `(Nat -> Nat) -> Nat -> Nat`.
-
-Of course, since we've added new syntax,
-we need to add new semantics too.
-There is nothing too surprising here:
-the rules are the same as for abstractions and applications,
-except that the right-hand side `T` of an application can't step
-because it needs to be a literal type.
-That means that, in some sense, this semantics is automatically "call by value".
+With this in mind,
+our typing process needs to look inside the body `t` of the abstraction,
+and give it a type.
+But along the way, we need to *remember* the type of the argument we passed in.
+So for the term `λx:T. t`,
+we roughly want a typing *rule* that looks like this:
 $$
-\frac{t_1 \rightarrow t_1'}{t_1 \\: T \rightarrow t_1' \\: T} \\: \textrm{STAppLeft}
+\frac{x : T_1 \\: \vdash \\: t \\: : \\:  T_2}{\vdash \lambda x:T_1. t \\: : \\: T_1 \rightarrow T_2}
 $$
+Here, we've changed the typing relation from a binary $t:T$
+to a ternary relation $a \vdash t: T$,
+which we read as "under assumption $a$, term $t$ has type $T$".
+Let's read this rule in two steps.
+Above the line (the premise),
+we're saying "assuming that $x$ has type $T_1$, $t$ has type $T_2$".
+This is us giving a type to the body of the abstraction,
+*under the assumption* that we know the type of the input.
+For example, in the term `λx. x` we looked at above,
+if we know the type $T_1$ of the input is `bool`,
+then we will be able to know that the type $T_2$ of the body is also `bool`.
+Given this premise,
+the typing rule says we can conclude that (with *no* assumptions)
+the term $\lambda x:T_1. t$ has type $T_1 \rightarrow T_2$;
+in other words, it's a function that takes as input a $T_1$ and returns a $T_2$.
+We don't need any assumptions in this conclusion because the type of $x$ is included in the *syntax* of the abstraction.
+
+## The simply typed lambda calculus
+
+We''ve just about finished defining our type system,
+but there's one more thing to notice.
+In general, we might need more than one assumption to type a term with nested abstractions.
+To keep track of these assumptions, we introduce a *typing context*,
+conventionally written $\Gamma$,
+that maps variables to their types.
+(We have to be careful about capture avoidance again here;
+we assume that variables will be renamed as necessary to avoid capturing).
+To extend a typing context $\Gamma$ with an additional assumption we use a comma:
+$\Gamma, x : T$.
+
+Then the general version of our typing rule for abstractions looks like this:
 $$
-\frac{}{(\Lambda\alpha. \\: t) \\: T \rightarrow t[\alpha \mapsto T]} \\: \textrm{STApp}
+\frac{\Gamma, x : T_1 \\: \vdash \\: t \\: : \\:  T_2}
+{\Gamma \vdash \lambda x:T_1. t \\: : \\: T_1 \rightarrow T_2}  \\: \textrm{TAbs}
 $$
 
-One point to note here is that our substitution notion is slightly different,
-and we're being lazy with syntax.
-In $\textrm{STApp}$ we're substituting a *type* into a *term*,
-which is different to the *term*-into-*term* substitution we've been doing before.
-The only place this *type*-into-*term* substitution happens is in the *type annotations* of abstractions:
-for an abstraction `λx:α. x`, if `α` is the type variable we are substituting for,
-then we need to replace it with the concrete type `T`.
-
-### Polymorphic typing rules
-
-Finally, how do we decide when a term in our new language
-has a type in our new type system?
-We need to extend our *typing judgment* to include rules for the type abstraction and type application terms.
-Here's the judgment for type abstractions:
+With this framework in mind, the typing rules for the other terms in our lambda calculus
+are fairly administrative.
+To type a variable we just look it up in the current typing context:
 $$
-\frac{\Gamma, \alpha \\: \vdash \\: t \\: : \\:  T}
-{\Gamma \vdash \Lambda \alpha. \\: t \\: : \\: \forall \alpha. T}  \\: \textrm{TTAbs}
+\frac{x:T \in \Gamma}
+{\Gamma \vdash x : T}  \\: \textrm{TVar}
 $$
-One little thing to note here is that we need to extend our typing context $\Gamma$
-to include the type variable $\alpha$ that is newly in scope.
-But unlike the rule for typing regular abstractions,
-we don't need to remember anything about $\alpha$,
-because type variables are only used in System F for *universal types* `∀α. T`.
-In other words, the actual type assigned to $\alpha$ is irrelevant to the typing judgment.
-We're remembering $\alpha$ in the context
-only to do capture-avoiding substitution
-if type variables are reused.
+And to type an application,
+we just recurse on both sides:
+$$
+\frac{\Gamma \vdash t_1 : T_1 \rightarrow T_2 \quad \Gamma \vdash t_2 : T_1}
+{\Gamma \vdash t_1 \\: t_2 : T_2}  \\: \textrm{TApp}
+$$
+Remember that we've added booleans to our calculus now,
+so we need typing rules for those too.
+The rules for boolean literals are axiomatic:
+$$
+\frac{}
+{\Gamma \vdash \texttt{true} : \texttt{bool}}  \\: \textrm{TTrue}
+$$
+$$
+\frac{}
+{\Gamma \vdash \texttt{false} : \texttt{bool}}  \\: \textrm{TFalse}
+$$
+The rule for `if` is not too surprising—the condition must be a boolean,
+and both sides of the branch must have the same type:
+$$
+\frac{\Gamma \vdash t_1 : \texttt{bool} \quad \Gamma \vdash t_2 : T \quad \Gamma \vdash t_3 : T}
+{\Gamma \vdash \texttt{if } t_1 \texttt{ then } t_2 \texttt{ else } t_3 : T}  \\: \textrm{TIf}
+$$
 
-Finally, here's the judgment for type applications:
-$$
-\frac{\Gamma \\: \vdash \\: t_1 \\: : \\:  \forall \alpha. T_{12}}
-{\Gamma \\: \vdash \\: t_1 \\: T_2 \\: : \\: T_{12}[\alpha \mapsto T_2]}  \\: \textrm{TTApp}
-$$
-Here we have yet another form of substitution in the conclusion!
-$T_{12}[\alpha \mapsto T_2]$ is doing *type*-in-*type* substitution:
-in the type $T_{12}$, replace any instances of type variable $\alpha$
-with the type $T_2$.
-Hopefully it now makes sense why we spent so much time talking about substitution in [Week 06](@/notes/week06/_index.md)—it comes up everywhere!
+### Examples of typed and untypable terms
 
-## Programming with System F
-
-As we've hinted at a few times,
-System F lets us write truly generic types for some of the functions we've seen before.
-For example,
-let's validate that `id Bool` has type `Bool -> Bool`,
-as we hoped for,
-where `id = Λα. λx:α. x`:
+Let's see this type system in action.
+We're able to give the type `bool` to the term `(λx:Bool. x) true`,
+which we can see by building the derivation tree:
 $$
-\dfrac{
-    \dfrac{
-        \dfrac{
-            \dfrac{ x:\alpha \\, \in \\, \alpha, x:\alpha}
-            { \alpha, x:\alpha \\: \vdash \\: x \\: : \\: \alpha} \textrm{TVar}
-        }{ \alpha \\: \vdash \\: \lambda x:\alpha. \\: x \\: : \\: \alpha \rightarrow \alpha} \\: { \textrm{TAbs}}
-    }{ \vdash \\: \texttt{id} \\: : \\: \forall \alpha. \\: \alpha \rightarrow \alpha} \\: {\textrm{TTAbs}}
+\frac{
+    \frac{
+        \frac{\huge  x \\: : \\: \texttt{bool} \\: \in \\:  x \\: : \\: \texttt{bool}}
+        {\huge x \\: : \\: \texttt{bool} \\: \vdash \\: x \\: : \\: \texttt{bool}} \\: {\large \textrm{TVar}}
+    }
+    {\Large \vdash (\lambda x: \texttt{bool}. \\: x) \\: : \\: \texttt{bool} \rightarrow \texttt{bool}} \\: \textrm{TAbs}
+    \quad
+    \frac{}{\Large \vdash \texttt{true} : \texttt{bool}} \\: \textrm{TTrue}
 }
-{ \vdash \\: \texttt{id Bool} \\: : \\: \texttt{Bool} \rightarrow \texttt{Bool}} \\: \textrm{TTApp}
+{\vdash (\lambda x: \texttt{bool}. \\: x ) \\: \texttt{true} \\: : \\: \texttt{bool}} \\: \textrm{TApp}
 $$
-The same proof structure will tell us that `id Nat` will have type `Nat -> Nat`, and so on for any other type.
+Notice an important property here:
+the type of this term is the type of *the value it reduces to*;
+it's not "obviously" (syntactically) a boolean, but will eventually become a boolean by evaluation.
 
-One thing we can do with our new polymorphism
-is give types to the Church encodings we saw before.
-The type `CBool` of Church booleans (to distinguish them from the `Bool` we've baked into our calculus)
-is `∀α. α -> α -> α`:
-A Church boolean takes two arguments of the same type and returns one of them.
-As another example,
-`CNat` is really just the type
-`∀α. (α -> α) -> α -> α`:
-a `Nat` in the Church encoding
-takes as input a function and a base term,
-and returns the same type.
-Then, for example,
-`1` is the term `Λα. λf:α->α. λx:α. f x`.
+But more importantly, the goal we set out for was to be *unable* to give types to terms that are stuck.
+For example, the term `true (λx. x)` was stuck.
+It's also untypable: by $\textrm{TApp}$, the only way to give this term a type
+is for the left-hand side `true` to have an arrow type $T_1 \rightarrow T_2$,
+but the only way to give a type to `true` is the rule $\textrm{TTrue}$, which gives `bool`.
+Similarly, the term `if (λx. x) then true else false` is stuck,
+and is untypable: the rule $\textrm{TIf}$ requires the condition to have type `bool`,
+but the only way to give a type to an abstraction is $\textrm{TAbs}$,
+which forces an arrow type $T_1 \rightarrow T_2$.
 
-A natural question might be:
-can we give a type to the Y combinator for general recursion?
-Unfortunately, the answer is no:
-all well-typed programs in System F terminate.
-This property of a type system—that well-typed programs terminate—is called *normalization*.
-The proof of this is very difficult—it was one of the major parts of Girard's PhD thesis.
+## Type safety
 
-### Properties
+But how do we know we *really* got this type system right—how do we know that any term we can assign a type to cannot get stuck?
+We say that a term is *well-typed* if there exists a $T$ such that $\vdash t:T$;
+in other words, a term is well-typed if it can be assigned a type in the empty type context.
+Then the property we're interested in is that well-typed programs do not get stuck.
+This fundamental property of type systems is called *type safety* or *type soundness*.
 
-As with the simply typed lambda calculus,
-we can prove that System F is sound,
-in the sense that well-typed programs cannot get stuck.
-The proof via syntactic type safety
-is very close to the one we saw last lecture:
-we prove progress and preservation,
-and those compose to give type safety.
+Surprisingly, while type systems are quite old and well understood,
+the ways to prove type safety have evolved over the years.
+The way we're going to do it—probably the most common and practical approach today—is a relatively modern approach called *syntactic* type safety,
+advanced (separately) by Bob Harper and by Andrew Wright and Matthias Felleisen in the 90s.
+We will prove type safety in two steps:
+1. **Progress**: A well-typed term is never stuck—either it is a value, or it can take a step.
+2. **Preservation**: If a well-typed term can step, the resulting term is also well-typed.
 
-## Type erasure
+Notice that preservation is quite a weak property.
+In the simply typed lambda calculus, a stronger property holds:
+stepping preserves not only well-typedness but also the exact type itself.
+We will prove the stronger version of preservation,
+because it's a little easier (no existential),
+but in general the weaker form suffices for type safety.
 
-One thing you might find unusual or inelegant about System F
-is that it extends the syntax of *the base language* itself.
-There are two ways to look at this quirk.
-One is that it's not too different to how generics make their way into other languages you've seen:
-those show up in the syntax too, when we write things like `LinkedList<T>`.
-Under the hood, we have some idea that the compiler or runtime is "instantiating"
-these type abstractions with the right concrete types when we try to use them.
-This isn't too different to the type abstractions and applications we have in System F.
+Let's formalize this a bit more precisely.
+First, as always, we'll assume we are discussing only *closed* terms.
+Type safety, the idea that well-typed programs never go wrong,
+looks like this:
 
-Another way to look at it is that all these type annotations and abstractions
-can be *erased* from the program if we want to—they don't really have any effect
-on the behavior of the program;
-they exist only to extend the strength of our well-typed guarantees.
+**Theorem** (safety): If $\vdash t: T$ and $t \rightarrow^* t'$ and $t'$ cannot step, then $t'$ is a value and $\vdash t' : T$.
 
-The type erasure $\operatorname{erase}(t)$ of a term `t` just replaces any type abstraction `Λα. t`
-with its body `t`, and deletes the type annotation `T` from any abstraction `λx:T. t`.
-We're left with a lambda calculus term that is functionally equivalent,
-which we can capture in an *adequacy* theorem:
+The two lemmas we'll prove look like this:
 
-**Theorem** (adequacy): $t \rightarrow t'$ if and only if $\operatorname{erase}(t) \rightarrow \operatorname{erase}(t')$.
+**Lemma** (progress): If $\vdash t: T$ then either $t$ is a value or there exists a $t'$ such that $t \rightarrow t'$.
 
-A natural question to ask about type erasure is:
-if we can *delete* the types from a typed term,
-is there also a way to *add* the types to an untyped term?
-We say that an untyped term $m$ is *typable*
-if there exists some well-typed term $t$
-such that $\operatorname{erase}(t) = m$.
-The question of deciding whether a term is typable
-is the *type reconstruction* problem.
-We'll study this problem in more detail in a later lecture,
-but for now,
-the answer for System F is not quite:
-type reconstruction for System F is *undecidable*,
-although this was an open problem until 1994.
-This is the motivation for various restrictions of System F,
-such as let polymorphism.
+**Lemma** (preservation): If $\vdash t: T$ and $t \rightarrow t'$ then $\vdash t' : T$.
 
-## Parametricity
+It's not too hard to see how these two lemmas combine to prove type safety:
+preservation tells us that any $t'$ such that $t \rightarrow^* t'$ will have type $T$,
+and progress tells us that when we can no longer step we'll have reached a value.
+So all the hard work for proving type safety is in proving these two lemmas.
+Let's see how those proofs go.
 
-Finally, let's take a brief look at a surprising and interesting property
-of programs that are parametrically polymorphic.
+### Progress
 
-There are many different functions that have type `Bool -> Bool`. Here are a few:
-```
-λx:Bool. x 
-λx:Bool. true
-λx:Bool. false
-λx:Bool. if x then false else true
-...
-```
-These are (mostly) all *different functions*, in the sense that they evaluate to (two) different values.
-More generally, there are many functions of type `Bool -> (Bool -> Bool)`, etc.
+**Lemma** (progress): If $\vdash t: T$ then either $t$ is a value or there exists a $t'$ such that $t \rightarrow t'$.
 
-By contrast, try to write down a list of all the functions that have type `∀α. α -> α`.
-*There is only one*: `Λα. λx:α. x`.
-*Every* program of type `∀α. α -> α` must behave *identically* to this one.
-This is very surprising!
-Informally, it says that
-if you give me only a parametrically polymorphic type,
-I can tell you quite a bit about the behavior of *any* term of that type.
-Intuitively, the idea is that because the term with type `∀α. α -> α`
-is polymorphic in `α`,
-it can't *do anything interesting* with its argument:
-whatever it wants to do
-needs to work for *every possible type `α`*,
-and the lambda calculus is so simple that the
-only such thing it can do is *return the argument*.
+**Proof**: By induction on the derivation of the typing relation $\vdash t: T$:
+* $\textrm{TVar}$: this case is impossible, because we assume closed terms, and closed terms are untypable in the empty context.
+* $\textrm{TTrue}$, $\textrm{TFalse}$, $\textrm{TAbs}$: in all these cases, $t$ is a value.
+* $\textrm{TIf}$: suppose $t = \texttt{if } t_1 \texttt{ then } t_2 \texttt{ else } t_3$, and that $t$ is well typed.
+  Then by $\textrm{TIf}$ we know that $t_1$ has type `bool`.
+  By the inductive hypothesis, we know $t_1$ is either a value or can step to some $t_1'$.
+  We can consider those two cases separately:
+  * If $t_1$ is a value, then it must be either `true` or `false`, because those are the only values of type `bool`
+    (this is called a *canonical forms* lemma, and strictly speaking, we need to prove this fact).
+    In either case one of the step rules will apply ($\textrm{LIfTrue}$ or $\textrm{LIfFalse}$, respectively),
+    and so $t$ can step.
+  * If $t_1$ can step to some $t_1'$, then by $\textrm{LIf}$ $t$ can step.
+* $\textrm{TApp}$: suppose that $t = t_1 \\: t_2$, with $\vdash t_1 : T_1 \rightarrow T_2$ and $\vdash t_2 : T_1$ by $\textrm{TApp}$.
+  By the inductive hypothesis, either $t_1$ is a value or it can step to some $t_1'$,
+  and likewise for $t_2$.
+  Consider these cases:
+  * If $t_1$ can step, then rule $\textrm{LAppLeft}$ applies, so $t$ can step.
+  * If $t_1$ is a value and $t_2$ can step, then rule $\textrm{LAppRight}$ applies, so $t$ can step.
+  * Otherwise both $t_1$ and $t_2$ are values. Then $t_1$ must have the form $\lambda x: T_1. t_2$,
+    since that is the only value that has type $T_1 \rightarrow T_2$ (again by canonical forms),
+    and so $t$ can step by beta reduction.
 
-This phenomenon is called *parametricity*:
-the idea that polymorphic terms behave uniformly on their type variables.
-Note that it depends very centrally on how *simple* the lambda calculus is:
-language features like reflection break parametricity.
+### Preservation
 
-As another example, consider the type `CBool = ∀α. α -> α -> α` we saw before.
-There are *only two terms* that have this type (up to $\alpha$-equivalence):
-`Λα. λx:α. λy:α. x` and `Λα. λx:α. λy:α. y`.
-We can figure this out rather mechanically,
-again because any term with this type can't do anything except return one of the two `α`s it has access to:
-it has no way to "invent" another `α` because it has no idea what `α` is.
-These two terms are exactly the terms `true` and `false`.
+Preservation is a little trickier.
+Informally, the trouble is with beta reduction:
+we need to prove that the substitution we perform during beta reduction
+preserves types.
+We call that a *substitution lemma*, and it's helpful to prove it separately:
+
+**Lemma** (substitution): if $\Gamma, x:T' \\: \vdash \\: t \\: : \\: T$ and $\Gamma \\: \vdash \\: t' : T'$, then $\Gamma \\: \vdash \\: t[t'/x] \\: : \\: T$.
+
+**Proof**: By induction on the derivation of $\Gamma, x:T' \\: \vdash \\: t \\: : \\: T$. The proof is a bit fiddly, so I won't write it out here,
+but you can see it as lemma 9.3.8 in [*Types and Programming Languages*](https://ebookcentral.proquest.com/lib/washington/reader.action?docID=3338823&ppg=129)
+or in [*Software Foundations*](https://softwarefoundations.cis.upenn.edu/plf-current/StlcProp.html#lab236).
+
+The substitution lemma gives us what we need to prove preservation:
+
+**Lemma** (preservation): If $\vdash t: T$ and $t \rightarrow t'$ then $\vdash t' : T$.
+
+**Proof**: By induction on the derivation of $t \rightarrow t'$ (although inducting on the typing judgment works too). Again,
+the proof is in the textbook if you want to see it.
+
+## Consequences of the simply typed lambda calculus
+
+We've proved type safety—every well-typed program cannot get stuck.
+It's a great win for convenience. We no longer have to use Church encodings for everything;
+instead we can "bake in" the important features,
+which is all that real (functional) programming languages are doing above the lambda calculus.
+
+However, not all is well in the world.
+One problem with our type system is that it *rejects* some programs that don't get stuck.
+The first obvious example is the identity function `λx. x`.
+In our type system, there's no way to type this function without knowing the type of the input;
+that means there's no longer just one identity function
+but actually one *for each input type*,
+which is less than ideal.
+In the next lecture we'll study polymorphism as a solution to this problem.
+
+But even ignoring polymorphism,
+there are valid terms we can't give types to.
+Consider `if true then (λx. x) else false`.
+This term never gets stuck, and evaluates to the value `λx. x`,
+but we cannot give it a type in our type system:
+the $\textrm{TIf}$ rule requires both sides of the branch to have the same type,
+even though we can clearly see that the type of the `else` case "doesn't matter" for this program.
+
+This is a somewhat fundamental trade off of type systems:
+in pursuit of ruling out bad programs,
+we often unjustly rule out some valid programs too.
+This is what makes designing a type system a bit of an art;
+we want a system strong enough to reject all the bad programs,
+but it also needs to allow us to write lots of valid programs.
+In some sense this tension is fundamental:
+the untyped lambda calculus was Turing complete,
+so if we had managed to write a *complete* type system
+(one that assigned a type to *every* term that doesn't get stuck),
+we would have solved the halting program.
 

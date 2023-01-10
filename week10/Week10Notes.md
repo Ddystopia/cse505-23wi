@@ -1,8 +1,7 @@
 +++
-title = "Week 10 - Program Analysis, Distributed Systems, and Victory Lap"
+title = "Week 10 - Compiler Correctness: Simulation Relations"
 +++
 
-# Week 10 - Program Analysis, Distributed Systems, and Victory Lap
+# Week 10 - Compiler Correctness: Simulation Relations
 
 Notes TBD
-

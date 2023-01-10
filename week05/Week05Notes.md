@@ -1,130 +1,46 @@
 +++
-title = "Week 05 - Hoare Logic"
+title = "Week 05 - Imp: Operational Semantics"
 +++
 
-# Week 05 - Hoare Logic
+# Week 05 - Imp: Operational Semantics
 
 _These notes were written by primarily by Prof. James Bornholt for his course at
 UT Austin. James is a PhD alum of UW and "friend of the channel", and we thank
 him for permission to reuse and adapt these notes back at UW!_
 
-Over the last few lectures, we've been building and refining ways to *prove properties about programs*.
-In [Week 03](@/notes/week03/_index.md), we saw how to manually construct a transition system for a program,
-and then use that transition system to prove things about the behaviors of that program.
-But constructing those transition systems was a manual process for each new program.
-In [Week 04](@/notes/week04/_index.md), we remedied this with operational semantics,
-which allowed us to define a transition system for a language once and for all,
-and use it to prove things about the behavior of any program in that language.
-But those proofs were tedious, because they required us to think about every small step of the program,
-most of which were terribly uninteresting for the properties we were looking to prove.
-They also required us to come up with different invariants to the ones we wanted—including
-needing to somehow inline the program itself into the invariant.
-It was a promising approach, and worked well for proving properties about *languages*,
-but was overly tedious for proving properties about *programs*.
+In [Week 03](@/notes/week03/_index.md) we foreshadowed the need
+for a different style of semantics that could handle non-terminating programs.
+In [Week 04](@/notes/week04/_index.md)
+we started building some infrastructure that could deal with non-termination
+using *transition systems*,
+which allowed us to talk about intermediate *states* of a program
+and the *steps* between them.
+We saw that we could use this infrastructure to prove invariants about programs
+even if they didn't terminate.
 
-In this lecture, we'll further automate this pipeline for proving properties about programs
-by introducing *axiomatic semantics*,
-our third (and final) approach to semantics in this course.
-Axiomatic semantics define the meaning of a program in terms of logical assertions,
-such as *pre-* and *post-conditions* about program states.
+However, when we were building transition systems for programs,
+we were doing a lot of manual work.
+For each program, we had to manually define the "states" of the program.
+The choice of states was critical—make the wrong choice and we'd be able
+to prove invariants that weren't really invariant,
+or we wouldn't be able to prove anything at all.
 
-We'll focus in particular on the most popular style of axiomatic semantics,
-known as *Hoare logic* for its creator, [Sir Tony Hoare](https://en.wikipedia.org/wiki/Tony_Hoare),
-or sometimes as *Floyd-Hoare logic* as it was earlier developed in a separate context by [Robert Floyd](https://en.wikipedia.org/wiki/Robert_W._Floyd).
-(They both received Turing awards for this work!)
-Hoare logic will give us a way to write down *proof rules* about programs,
-prove those rules correct once and for all,
-and then apply them to any program without appealing to the tedious operational semantics.
+In this lecture, we'll see how to *automate*
+converting a program into a transition system.
+This approach to modeling programs is known as *operational semantics*,
+and gives us a more general way to talk about intermediate states of any program
+in some language.
 
-## Hoare triples
+## The IMP language
 
-In [Week 04](@/notes/week04/_index.md) we introduced a few new *propositions* about programs.
-One proposition $(v, c) \rightarrow^* (v', c')$ was about reachability;
-if true, this proposition means that the program can reach state $(v' ,c')$ if it starts from state $(v, c)$.
-Another proposition $(v, c) \Downarrow v'$ was about termination:
-if true, this proposition means that the program can terminate in state $v'$ when starting from state $(v, c)$.
+We're going to illustate operational semantics using a language called IMP.
+IMP is often used as an example of a simple but realistic programming language
+because it has most of the features you'd expect—loops, conditionals, and assignment.
+You'll see a version of IMP in most PL textbooks;
+they vary in minor ways, but the idea is the same.
 
-Hoare logic introduces another proposition about programs,
-this time about *invariants* of the program.
-The big idea of Hoare logic is to think about invariants
-and how they *change* when a program executes.
-In a sentence, a proposition in Hoare logic says:
-
-> If property $P$ holds before program `c` runs, then property $Q$ holds after.
-
-Here, $P$ and $Q$ are *predicates over states*, sometimes called *assertions*,
-and `c` is a program in IMP.
-The assertion $P$ that holds before executing `c` is called a *precondition*.
-The assertion $Q$ that holds after executing `c` is called a *postcondition*.
-We call a Hoare logic proposition like this one a *Hoare triple*.
-Just like $\rightarrow^*$ and $\Downarrow$, Hoare triples are propositions that may be true or false,
-and we'll define rules for *when* Hoare triples are true shortly.
-
-Hoare triples are so common that, as is often the case in PL, we have a special notation for them:
-$$
-\\{ P \\} \\: c \\: \\{ Q \\}
-$$
-We sometimes say that a Hoare triple is *valid* if this proposition is actually true.
-
-You might have noticed a subtlety in the English definition of the postcondition $Q$ above.
-A Hoare triple says that property $Q$ holds after executing `c`.
-But what if `c` doesn't terminate, as IMP programs are not guaranteed to do?
-For now, we are going to study Hoare logic through a lens of *partial correctness*.
-Our Hoare triples will actually mean something slightly weaker:
-
-> If property $P$ holds before program `c` runs, *and `c` terminates*, then property $Q$ holds after.
-
-There is also a variant of Hoare logic whose triples, written $\[ P \] \\: c \\: \[ Q \]$,
-also promise termination:
-
-> If property $P$ holds before program `c` runs, then `c` terminates and $Q$ holds after termination.
-
-This is known as *total correctness*. We won't study it further,
-because it's not interestingly different, but is harder.
-Just remember that our focus on partial correctness will make our Hoare logic a little weaker,
-because it won't allow us to draw any conclusions about programs that don't terminate.
-We'll see a little later how to recover some of this ability.
-
-### Examples of Hoare triples
-
-Even though we haven't precisely defined the rules of Hoare logic,
-we can appeal to our intuition about IMP's semantics to see when Hoare triples are valid.
-Here are a few examples:
-* $\\{ x = 5 \\} \\: x \texttt{ <- } x + 5 \\: \\{ x = 10 \\}$ is valid: if $x$ was 5 before executing the program,
-  which just incremented $x$ by 5, then surely $x = 10$ is true afterwards.
-* $\\{ x = 5 \\} \\: x \texttt{ <- } x + 5 \\: \\{ x \geq 6 \\}$ is valid: just like the previous one,
-  $x \geq 6$ is just another property that is true after executing the program.
-* $\\{ x \geq 5 \\} \\: x \texttt{ <- } x + 5 \\: \\{ x \geq 10 \\}$ is valid: a slightly more interesting example,
-  but simple math tells us that this one holds.
-* $\\{ \textrm{true} \\} \\: x \texttt{ <- } 10 \\: \\{ x = 10 \\}$ is valid: no matter what state we start from,
-  if we execute this assignment, this postcondition must hold.
-
-Let's look at conditionals:
-* $\\{ x \geq 0 \\} \\: \texttt{if } x \texttt{ then } x \texttt{ <- } x - x \texttt { else skip} \\: \\{ x = 0 \\}$ is valid:
-  regardless of which branch we take, the postcondition holds after execution.
-* $\\{ x > 0 \\} \\: \texttt{if } x \texttt{ then } x \texttt{ <- } x - x \texttt { else } x \texttt{ <- } 1 \\: \\{ x = 0 \\}$ is valid:
-  even though the `else` branch would violate our postcondition, it is unreachable,
-  because the precondition says $x$ is greater than zero and the condition we test is $x$.
-
-
-And here are some more extreme examples:
-* For any `c`, $\\{ \textrm{true} \\} \\: \texttt{c} \\: \\{ \textrm{true} \\}$ is valid, since $\textrm{true}$ is, well, always true, regardless of program state.
-* For any `c` and $Q$, $\\{ \textrm{false} \\} \\: \texttt{c} \\: \\{ Q \\}$ is valid. The precondition never holds,
-  and our definition of a Hoare triple started "If the precondition holds ...", so this triple is vacuously true.
-* $\\{ \textrm{true} \\} \\: \texttt{c} \\: \\{ \textrm{false} \\}$ is valid *if and only if* `c` does not terminate.
-  If `c` does not terminate, then this triple clearly holds,
-  as our definition of partial correctness speaks only about termination.
-  Conversely, if this triple is valid, `c` must not terminate,
-  as $\textrm{false}$ cannot be true of _any_ final state.
-
-
-
-## Rules of Hoare logic
-
-Just like the propositions we defined for operational semantics,
-we can define when a Hoare triple is true inductively,
-using a set of inference rules.
-As a reminder, here's the syntax of IMP, the language our Hoare triples will reason about:
+As always, to define a programming language, we need two things: syntax and semantics.
+Here's the syntax for IMP:
 
 ```
 cmd := skip
@@ -134,390 +50,425 @@ cmd := skip
      | while expr do cmd
 ```
 
-As always, to define a proposition over IMP programs, we'll define what happens with each of these constructors.
+Here, we're reusing the `expr` language we saw at the end of [Week 03](@/notes/week03/_index.md), whose syntax looked like this:
+```
+expr := Const nat
+      | Var var
+      | Plus expr expr
+      | Times expr expr
+```
 
-### Skip is a no-op
+What about semantics? Well, we saw in Lecture 2 that denotational semantics
+wouldn't work easily here, because we have loops that might not terminate.
+Instead, we're going to define IMP's semantics *operationally*
+as a transition system.
 
-First up, `skip`.
-Here's the one Hoare logic rule for `skip` programs:
+## Small-step operational semantics
+
+In Lecture 3, we had to redefine a transition system *for every program*,
+because the way we defined states and steps was by staring at the program
+and handwaving about "iterations of the loop".
+How can we instead define a transition system *for the entire language* once and for all,
+rather than inventing one for each program?
+
+We know we're defining a transition system,
+so we need to define three things:
+1. The set of states $S$. We saw at the end of Lecture 3 that, in addition to tracking variables, our states need some way to remember where we are in executing the program. We're going to do this by making our states be *pairs* $(v, c)$, where $v$ is a valuation (a variable map) assigning values to each variable, and $c$ is a `cmd` reflecting the "rest" of the program that still needs to be executed. Informally, we can think of $c$ as analogous to the *program counter* most computer architectures have—it lets us track where we are in the program so that we know what the next step(s) will be.
+2. The set of initial states $S_0 \subseteq S$. Knowing how we define states, we can define the initial state as just an initial valuation $v_0$ and the program to execute $c_0$. Again the analogy to architectures: when a program states, the program counter is at the start of the program (the entire program remains to be executed), and the memory is either empty or all-zeros, depending on how you think about it.
+3. The transition relation $\rightarrow$. From our definition of states, we know this relation needs to tell us when we can step $(v, c) \rightarrow (v', c')$. Clearly, this is going to depend on $v$ and $c$, but it *no longer depends on the actual program* we're trying to model, unlike in Lecture 3.
+
+So the big remaining task is to define the transition relation $\rightarrow$.
+We could try to write it down as a set, like we did in the last lecture,
+but that would be pretty tedious.
+Instead, let's use the idea of an inductively defined proposition from last lecture
+and define $\rightarrow$ as a set of *inference rules*.
+As usual with an inductive definition like `cmd`,
+we need to consider cases for each constructor.
+
+First, let's deal with assignments `x <- e`.
+Informally we know how this works:
+we evaluate `e` and then update the valuation to map `x` to that value.
+Here it is as an inference rule:
+$$
+\frac{v' = v[x \mapsto \[\\!\[ e \]\\!\]_v]}
+{(v, \texttt{x <- e}) \rightarrow (v', \texttt{skip})} \\: \textrm{Assign}
+$$
+What we've said is that, to step an assignment statement,
+we evaluate $e$ with its denotational semantics,
+and then update the current valuation $v$ to map $x$ to that new value.
+Notice that, when we had to choose a command `c` to step *to*,
+we used `skip`.
+The idea is that `skip` in this position means "terminated";
+if we ever reach a state $(v, \texttt{skip})$
+then there's nowhere left to go and $v$ is the final state of the program.
+So if our program is just a single assignment statement,
+we execute this rule once and then the program is done.
+We've also given this rule a name $\textrm{Assign}$ by writing it next to the rule.
+Naming our inference rules is going to be very helpful later
+(and we'll do it in Coq as well),
+so it's a good habit to get into.
+
+Now let's look at sequence commands `c1; c2`.
+The intuition is that to execute two commands in sequence,
+you first fully execute the left-hand side,
+and then fully execute the right-hand side
+starting from the state the left side ended in.
+So we'll need a rule like this for the first case:
+$$
+\frac{(v, c_1) \rightarrow (v', c_1')}
+{(v, c_1 \texttt{; } c_2) \rightarrow (v', c_1' \texttt{; } c_2)} \\: \textrm{SeqL}
+$$
+But how do we know we're "done"?
+Above, we said that `skip` means "terminated",
+so the idea is that we're done with the left-hand side
+when the $\textrm{SeqL}$ steps us to $c_1' = \texttt{skip}$.
+At that point, we can start stepping the right-hand side
+using a second rule:
 $$
 \frac{}
-{ \\{ P \\} \\: \texttt{skip} \\: \\{ P \\} } \\: \textrm{HSkip}
+{(v, \texttt{skip; } c_2) \rightarrow (v, c_2)} \\: \textrm{SeqR}
 $$
-This rule is an axiom, telling us something that's always true.
-The intuition is that if any property $P$ holds before executing `skip`,
-then it continues to hold after executing `skip`,
-because `skip` is a no-op -- it doesn't change anything about the state of the program.
-In fact, this rule would work for total correctness too, because `skip` always terminates.
+In words, once we're done with the left hand side,
+we can just get rid of it and make $c_2$ our remaining program.
+The other inference rules will then let us start executing $c_2$.
 
-### Assignments are substitution
+How about conditionals `if e then c1 else c2`?
+Our intuition is that conditionals can go two ways:
+if `e` is non-zero, then we want to execute `c1`,
+otherwise we want to execute `c2`.
+This structure suggests two inference rules,
+one for each side of the conditional:
+$$
+\frac{\[\\!\[ e \]\\!\]_v \neq 0}
+{(v, \texttt{if} \\; e \\; \texttt{then} \\; c_1 \\; \texttt{else} \\; c_2) \rightarrow (v, c_1)} \\: \textrm{IfTrue}
+$$
+$$
+\frac{\[\\!\[ e \]\\!\]_v = 0}
+{(v, \texttt{if} \\; e \\; \texttt{then} \\; c_1 \\; \texttt{else} \\; c_2) \rightarrow (v, c_2)} \\: \textrm{IfFalse}
+$$
+Just like for $\textrm{SeqR}$, these two rules are essentially telling us which
+part of the `if` statement we can "get rid of".
+If we want to enter the `then` branch,
+we throw away everything except $c_1$ and just start executing that;
+otherwise we throw away everything except $c_2$ and do the same.
 
-Next up is assignments.
-This one's a little funny looking, and probably the most puzzling of the Hoare logic rules,
-so we'll spend a little time on it:
+While loops `while e do c` are conceptually similar to `if`—we need
+a rule for entering the loop and a rule for not entering the loop.
+The big difference is that, when we enter the loop,
+we need to retain the loop as code that needs to be executed in the future
+because we want the whole loop to be evaluated again once the body has run once.
+Luckily, the sequence operation `;` gives us what we need to pull this off.
+We end up with this rule for entering the loop:
 $$
-\frac{P = P'[e / x]}
-{ \\{ P \\} \\: x \texttt{ <- } e \\: \\{ P' \\} } \\: \textrm{HAssign}
+\frac{\[\\!\[ e \]\\!\]_v \neq 0}
+{(v, \texttt{while} \\; e \\; \texttt{do} \\; c) \rightarrow (v, c \texttt{; } \texttt{while} \\; e \\; \texttt{do} \\; c)} \\: \textrm{WhileTrue}
+$$
+In words, if `e` evaluates to non-zero, then we know we need to execute the body of the loop `c` one time,
+and then re-execute the entire loop.
+The case fot not entering the loop just lets us throw the whole thing away:
+$$
+\frac{\[\\!\[ e \]\\!\]_v = 0}
+{(v, \texttt{while} \\; e \\; \texttt{do} \\; c) \rightarrow (v, \texttt{skip})} \\: \textrm{WhileFalse}
 $$
 
-First up, we have some new syntax.
-$P'[e/x]$ means *substitution*:
-in the body of property $P$,
-find every occurrance of $x$ and replace it with $e$.
-(I always had trouble remembering in which order this substitution happened,
-until someone suggested thinking of the $/$ as "falling over" onto $x$—"$e$ squashes $x$"—so $x$ is being replaced with $e$).
-For example, $(x = 5)[5 / x]$ is $5 = 5$.
-With that syntax in mind, this rule is saying that if we have a postcondition $P'$ that talks about $x$,
-we can show that it's true by first proving a different property $P'[e / x]$,
-where all the $x$s have been replaced with $e$,
-and then in our program assign $e$ to $x$.
+Finally, what about `skip`?
+We've been using `skip` to mean termination.
+Termination means the program can't step any more.
+So that means *there's no rule with `skip` on the left-hand side*!
+If we ever reach a state $(v, \texttt{skip})$,
+the program will therefore no longer be able to step,
+as there are no matching rules,
+so this state reflects termination.
 
-A few examples might help bed this idea down:
-* $\\{ 5 = 5 \\} \\: x \texttt{ <- } 5 \\: \\{ x = 5 \\}$ is valid by $\textrm{HAssign}$
-* $\\{ x+5 = 5 \\} \\: x \texttt{ <- } x+5 \\: \\{ x = 5 \\}$ is valid by $\textrm{HAssign}$
-* $\\{ x + 5 > 10 \\} \\: x \texttt{ <- } x + 5 \\: \\{ x > 10 \\}$ is valid by $\textrm{HAssign}$
+We're done! We've defined the entire transition relation for IMP
+as an inductively defined proposition (a set of inference rules whose conclusions are propositions about $\rightarrow$).
+In PL, we call the transition system defined the way we just did a *small-step operational semantics* for the language.
+It's *operational* because it talks about *how* to execute the program rather than *what* value the program has (denotational semantics).
+We'll see a little later why we call it *small step*. But first, let's see it in action.
 
-These might be more obvious if we do a little bit of math simplification in the preconditions:
-* $\\{ \textrm{True} \\} \\: x \texttt{ <- } 5 \\: \\{ x = 5 \\}$ is valid
-* $\\{ x = 0 \\} \\: x \texttt{ <- } x+5 \\: \\{ x = 5 \\}$ is valid
-* $\\{ x > 5 \\} \\: x \texttt{ <- } x + 5 \\: \\{ x > 10 \\}$ is valid
+### An example execution
 
-One important note about the second and third examples:
-$x$ appears on both sides of the assignment,
-but the substitution only happens once.
-That is, the result of $(x = 5)[x+5/x]$, which replaces all occurrences of $x$ by $x+5$,
-is $x + 5 = 5$, which still has occurrences of $x$ in the result.
+Last lecture we studied this program:
+```
+x = 5
+while True:
+    x = x + 1
+```
+which we can translate into our IMP syntax like this:
+```
+x <- 5; while 1 do (x <- x + 1)
+```
 
-### Sequences are composition
-
-The rule for sequences looks similar to big-step operational semantics:
-$$
-\frac{ \\{ P \\} \\: c_1 \\: \\{ Q \\} \quad\quad \\{ Q \\} \\: c_2 \\: \\{ R \\} }
-{ \\{ P \\} \\: c_1 \texttt{; } c_2 \\: \\{ R \\} } \\: \textrm{HSeq}
-$$
-What we're saying is that to prove a Hoare triple of a sequence $c_1 \texttt{; } c_2$,
-we first prove that we can run $c_1$ with some postcondition $Q$,
-and then prove that we can run $c_2$ *with $Q$ as a precondition*.
-Essentially, we've decomposed the proof into two smaller ones.
-
-### Conditionals and branch conditions
-
-There's only one rule for `if` now, but it has two premises,
-one for each side of the branch:
-$$
-\frac{ \\{ P \land [\\![ e ]\\!] \neq 0 \\} \\: c_1 \\: \\{ Q \\} \quad\quad \\{ P \land [\\![ e ]\\!] = 0 \\} \\: c_2 \\: \\{ Q \\} }
-{ \\{ P \\} \\: \texttt{if } e \texttt{ then } c_1 \texttt{ else } c_2 \\: \\{ Q \\} } \\: \textrm{HIf}
-$$
-Why only one rule?
-Unlike operational semantics,
-where we were talking about taking a step from a *single state*,
-Hoare triples are propositions about *every state* in which the precondition holds.
-That means that to prove a Hoare triple about an `if` command,
-we must prove it for *both sides* of the branch,
-because we don't have a single state that tells us which branch we're going to go down.
-
-In each subproof of $\textrm{HIf}$, we get a precondition that assumes the overall precondition $P$,
-but also a *branch condition* that remembers which side of the branch we're in.
-These branch conditions are essential for proving interesting triples like this one:
-$$
-\\{ x = 0 \lor x = 1 \\} \\: \texttt{if } x \texttt{ then } x \texttt{ <- } x + 1 \texttt{ else } x \texttt{ <- } x + 2 \\: \\{ x = 2 \\}
-$$
-If we didn't have the branch conditions,
-the first subproof would look like this:
-$$
-\\{ x = 0 \lor x = 1 \\} \\: x \texttt{ <- } x + 1 \\: \\{ x = 2 \\}
-$$
-which is clearly not true. Adding the branch conditions instead requires us to prove only:
-$$
-\\{ (x = 0 \lor x = 1) \land x > 0 \\} \\: x \texttt{ <- } x + 1 \\: \\{ x = 2 \\}
-$$
-which we can see is true after a little math (although to prove it formally, we need another rule we haven't seen yet).
-
-### Loops and loop invariants
-
-Finally, we come to the rule for `while` loops,
-which moves branch conditions around similar to $\textrm{HIf}$,
-but with a twist in terms of what properties it can use as pre- and post-conditions:
-$$
-\frac{ \\{ I \land [\\![ e ]\\!] \neq 0 \\} \\: c \\: \\{ I \\} }
-{ \\{ I \\} \\: \texttt{while } e \texttt{ do } c \\: \\{ I \land [\\![ e ]\\!] = 0 \\} } \\: \textrm{HWhile}
-$$
-Unlike the other rules,
-we no longer have arbitrary properties $P$ and $Q$ as pre- and post-conditions in the conclusion.
-Instead, we have only a single property,
-which I've suggestively named $I$ because we often call it a *loop invariant*.
-$I$ is a property that holds when first reaching the loop,
-*and is maintained by every iteration of the loop*.
-Eventually, *if* the loop terminates,
-the invariant must therefore still hold,
-and we also learn the additional condition $[\\![ e ]\\!] = 0$
-telling us that we have exited the loop.
-In other words, $I$ is invariant no matter how often the loop body iterates (including zero times).
-
-This rule for `while` loops lets us prove triples like this one:
-$$
-\\{ x \geq 0 \\} \\: \texttt{while } x \texttt{ do } x \texttt{ <- } x - 1 \\: \\{ x \geq 0 \land x = 0 \\}
-$$
-The subproof we have to do, applying the $\textrm{HWhile}$ rule, is:
-$$
-\\{ x \geq 0 \land x \neq 0 \\} \\: x \texttt{ <- } x - 1 \\: \\{ x \geq 0 \\}
-$$
-We actually can't quite prove this triple (more on that in a moment),
-but we can prove this one, using $\textrm{HAssign}$:
-$$
-\\{ x - 1 \geq 0 \\} \\: x \texttt{ <- } x - 1 \\: \\{ x \geq 0 \\}
-$$
-and, with a little math, these two triples are the same.
-
-### The rule of consequence
-
-In some of the examples we've used so far,
-we have taken a few liberties,
-saying things like "just use a little math".
-But this is a PL class, and we're defining the semantics of a new language here—we should be precise,
-even if it's pedantic.
-Or put another way,
-if we tried to type the inductively defined proposition $\\{ P \\} \\: c \\: \\{ Q \\}$ into Coq,
-we certainly can't write "just a little math" in the constructors!
-What justification do we have for this handwaving we've been doing?
-
-We need one more rule to help us meld pre- and post-conditions into the forms we want.
-It's called the *rule of consequence*, and it looks like this:
-$$
-\frac{ P \Rightarrow A \quad \\{ A \\} \\: c \\: \\{ B \\} \quad B \Rightarrow Q}
-{ \\{ P \\} \\: c \\: \\{ Q \\} } \\: \textrm{HCons}
-$$
-This is a fascinating rule compared to the others we've seen,
-because its premise is about *any* command `c`.
-What the rule of consequence does is give us some "wiggle room"
-to manipulate the pre- and post-conditions
-according to the rules of logic (in this case, over natural numbers).
-The way it treats pre- and post-conditions are different, and opposite of each other:
-* To prove a triple with precondition $P$, it is OK to *weaken* the precondition to $A$ instead.
-  If we can carry out the proof with the weaker $A$ as the precondition, then this is good enough,
-  as $A$ will always be true when $P$ is true.
-* To prove a triple with postcondition $Q$, it is OK to *strengthen* the postcondition to $B$ instead.
-  If we can carry out the proof with the stronger $B$ as the postcondition, then this is good enough,
-  as $Q$ will always be true when $B$ is true.
-
-Another way to look at this is using the definition of properties as *sets*
-that we saw in [Week 03](@/notes/week03/_index.md).
-*Weakening* a property $P$ *increases* the number of states contained in the set to $A \supseteq P$.
-If we can prove the Hoare triple starting from all the states in $A$,
-we can certainly prove it over the *subset* $P \subseteq A$ of those states.
-Symmetrically, *strengthening* a property $Q$ *decreases* the number of states contained in the set to $B \subseteq Q$.
-If we can prove that Hoare triple can only end in states in $B$,
-we can certainly prove that it can only end in states in $Q \supseteq B$.
-In other words: "weaker" means "bigger"—a weaker property is *less specific*, allowing more states;
-"stronger" means "smaller"—a stronger property is *more specific*, allowing fewer states.
-This is confusing and (for some people, including me) backwards from the way our simple "bigger is stronger" brain wants to think about it.
-That's OK! You get more comfortable with it as you go.
-
-A more PL-y way to talk about this,
-that you might also have seen in the context of generics in some languages (Java, for example),
-is that preconditions are *contra-variant* and postconditions are *co-variant*.
-It's analogous to subtyping in these languages:
-* Contravariance: if we need to define a method that can take a `Cat` as input,
-  it's certainly enough to define one that takes any `Animal` as input—*weakening* the input type.
-* Covariance: if we need to define a method that can return an `Animal` as output,
-  it's certainly enough to define one that returns only a `Cat`—*strengthening* the output type.
-
-(Personally, I don't find this variance interpretation of the rule of consequence very helpful,
-and I, a professional PL researcher, can never keep these two things straight,
-but this might help you connect some ideas together).
-
-### A proof of a Hoare triple
-
-Now we have all the rules for Hoare triples for partial correctness.
-Let's see how to do a proof with them.
-One style is to build a proof tree, like we did in [Week 04](@/notes/week04/_index.md)
-for big-step semantics.
-I prefer a different style that's a little less unwieldy to work with.
-Let's try to prove this triple:
+Let's see how this program executes under our small-step operational semantics.
+We start from the state $(\emptyset, x \texttt{ <- } 5 \texttt{; while } 1 \texttt{ do } (x \texttt{ <- } x + 1))$,
+where we write $\emptyset$ for the valuation with no variables set
+and are starting from a state where we have the entire program left to execute.
+Then we step like this:
 $$
 \begin{align}
-& \\{ x + y = n \\} \\\\
-& \texttt{while y:} \\\\
-& \quad\texttt{x = x + 1;} \\\\
-& \quad\texttt{y = y - 1 } \\\\
-& \\{ x = n \\}
+&(\emptyset, x \texttt{ <- } 5 \texttt{; while } 1 \texttt{ do } (x \texttt{ <- } x + 1)) \\\\
+&\quad\quad\rightarrow (\\{ x \mapsto 5\\}, \texttt{skip; while } 1 \texttt{ do } (x \texttt{ <- } x + 1)) &\textrm{by SeqL and Assign} \\\\
+&\quad\quad\rightarrow (\\{ x \mapsto 5\\}, \texttt{while } 1 \texttt{ do } (x \texttt{ <- } x + 1)) &\textrm{by SeqR} \\\\
+&\quad\quad\rightarrow (\\{ x \mapsto 5\\}, x \texttt{ <- } x + 1 \texttt{; while } 1 \texttt{ do } (x \texttt{ <- } x + 1)) &\textrm{by WhileTrue} \\\\
+&\quad\quad\rightarrow (\\{ x \mapsto 6\\}, \texttt{skip; while } 1 \texttt{ do } (x \texttt{ <- } x + 1)) &\textrm{by SeqL and Assign} \\\\
+&\quad\quad\rightarrow (\\{ x \mapsto 6\\}, \texttt{while } 1 \texttt{ do } (x \texttt{ <- } x + 1)) &\textrm{by SeqR} \\\\
+&\quad\quad\rightarrow (\\{ x \mapsto 6\\}, x \texttt{ <- } x + 1 \texttt{; while } 1 \texttt{ do } (x \texttt{ <- } x + 1)) &\textrm{by WhileTrue} \\\\
+&\quad\quad\rightarrow (\\{ x \mapsto 7\\}, \texttt{skip; while } 1 \texttt{ do } (x \texttt{ <- } x + 1)) &\textrm{by SeqL and Assign} \\\\
+&\quad\quad\rightarrow (\\{ x \mapsto 7\\}, \texttt{while } 1 \texttt{ do } (x \texttt{ <- } x + 1)) &\textrm{by SeqR} \\\\
+&\quad\quad\dots
 \end{align}
 $$
 
-We'd like to get to a place where $\textrm{HWhile}$ applies,
-but the postcondition doesn't quite match yet,
-so we'll need to rule of consequence.
-By a little math, we can see that $x + y = n \land y = 0 \Rightarrow x = n$,
-so let's use this stronger postcondition via $\textrm{HCons}$:
+### Small-step semantics for concurrency
+
+Our small-step semantics lets us talk about non-terminating and non-deterministic executions,
+which is a big step up over the denotational semantics we saw before.
+This is especially useful for concurrency,
+where we often talk about *interleavings* of concurrent tasks.
+We can reflect this idea in a small-step operational semantics.
+I'm not going to do the full development here—both *Software Foundations* and *Formal Reasoning About Programs*
+give good treatments of operational semantics for concurrency—but I can give the general idea.
+
+Let's add a new *parallel composition* construct `c1 || c2` to our IMP language.
+The idea is that `c1 || c2` represents two commands executing *concurrently*.
+At each step of the program,
+we can *choose* which of `c1` and `c2` is the next one to step,
+and in this way we're able to reach states that reflect interleavings of `c1` and `c2`.
+Operationally, this is just two simple rules:
 $$
-\begin{align}
-& \\{ x + y = n \\} \\\\
-& \texttt{while y:} \\\\
-& \quad\texttt{x = x + 1;} \\\\
-& \quad\texttt{y = y - 1 } \\\\
-& \\{ x + y = n \land y = 0 \\} \\\\
-& {\color{blue}\\{ x = n \\}} & {\color{blue}\textrm{by HCons}}
-\end{align}
+\frac{(v, c_1) \rightarrow (v', c_1')}
+{(v, c_1 \texttt{ || } c_2) \rightarrow (v', c_1' \texttt{ || } c_2)} \\: \textrm{ParL}
 $$
-In this proof style, I'll turn things we have proven $\color{blue}\textrm{blue}$,
-and leave things we still need to prove $\textrm{black}$.
-Our while loop now matches the while rule,
-so we can apply $\textrm{HWhile}$:
 $$
-\begin{align}
-& {\color{blue}\\{ x + y = n \\}} \\\\
-& \texttt{while y:} \\\\
-& \quad\\{x + y = n \land y \neq 0\\} \\\\
-& \quad\texttt{x = x + 1;} \\\\
-& \quad\texttt{y = y - 1 } \\\\
-& \quad\\{x + y = n \\} \\\\
-& {\color{blue}\\{ x + y = n \land y = 0 \\}} & {\color{blue}\textrm{by HWhile}} \\\\
-& {\color{blue}\\{ x = n \\}} & {\color{blue}\textrm{by HCons}}
-\end{align}
+\frac{(v, c_2) \rightarrow (v', c_2')}
+{(v, c_1 \texttt{ || } c_2) \rightarrow (v', c_1 \texttt{ || } c_2')} \\: \textrm{ParR}
 $$
-The while rule has discharged the outer triple, but left us with a subproof for the body of the loop.
-Here there's a couple of different ways to go;
-it will be most convenient to use the rule of consequence first
-to transform the precondition in a way that will work for the assignment rules:
+We also need a rule to "clean up" a terminated concurrent task and allow us to keep executing:
 $$
-\begin{align}
-& {\color{blue}\\{ x + y = n \\}} \\\\
-& \texttt{while y:} \\\\
-& {\color{blue}\quad\\{x + y = n \land y \neq 0\\}} & {\color{blue}\textrm{by HCons}} \\\\
-& \quad\\{x + 1 + y - 1 = n \\} \\\\
-& \quad\texttt{x = x + 1;} \\\\
-& \quad\texttt{y = y - 1 } \\\\
-& \quad\\{x + y = n \\} \\\\
-& {\color{blue}\\{ x + y = n \land y = 0 \\}} & {\color{blue}\textrm{by HWhile}} \\\\
-& {\color{blue}\\{ x = n \\}} & {\color{blue}\textrm{by HCons}}
-\end{align}
+\frac{}
+{(v, \texttt{skip || } c_2) \rightarrow (v, c_2)} \\: \textrm{ParSkipL}
 $$
-Now we can push the first assignment through the assignment rule,
-since $(x + y - 1 = n)[x+1/x]$ is $x + 1 + y - 1 = n$:
+
+Notice that $\textrm{ParL}$ and $\textrm{ParR}$ introduce *non-determinism* into our semantics—they
+can both be "enabled" at the same time.
+This is OK! When we talked about the step-star relation last lecture
+we were a little bit loose about what it meant.
+If $(v, c) \rightarrow^* (v', c')$,
+that means the program *can* step to the state $(v', c')$;
+it doesn't mean that the program *must* step to that state.
+In other words,
+it's possible for $(v, c) \rightarrow^* (v_1, c_1)$
+and $(v, c) \rightarrow^* (v_2, c_2)$ to hold,
+with $c_1 = c_2 = \texttt{skip}$ (i.e., both executions terminated),
+but $v_1 \neq v_2$.
+
+## Big-step operational semantics
+
+Small-step operational semantics give us a powerful and general purpose way to talk about the behavior of a program.
+Every step makes only a small change to the "state" of the program,
+and so we can talk about fine grained invariants of the program.
+This was especially great because it let us talk about the steps taken by non-terminating programs,
+and so prove interesting things about them even in the face of non-termination.
+The fine-grained steps also gave us a convenient way to model non-determinism,
+and especially concurrency—non-determinism is just having multiple rules that might apply to any individual state.
+
+But small-step semantics are pretty tedious.
+Most of the energy we spent on small-step proofs was not very interesting:
+it was just crunching through transitions of the step-star relation,
+and then every once in a while we'd get to actually "execute" a small piece of the program
+(roughly speaking, the only interesting transitions were the ones where the valuation changed).
+The `seq` rules were especially annoying:
+they required us to repeatedly disassemble the program into smaller pieces (the $c_1$s in $\textrm{StepSeqLeft}$),
+only to put them back together again into the resulting `seq` operation
+(this style of rule is known as a _congruence_ rule, because it relates smaller steps to larger ones).
+Is there a middle ground between tedious-but-powerful small-step operational semantics
+and simple-but-inexpressive denotational semantics?
+
+The answer is _big-step_ operational semantics.
+As the name suggests, big-step semantics take big steps,
+and in particular,
+a big step semantics relates any $(v, c)$ state to its _final_ valuation $v$ in just one step.
+In the same style as the $\rightarrow$ of small-step semantics,
+we write big-step semantics as a relation $(v, c) \Downarrow v'$,
+and say that $(v, c)$ _evaluates to_ (or sometimes _reduces to_) final state $v'$.
+
+### Big-step semantics for IMP
+
+Just like small-step semantics, we can define the big-step semantics relation $\Downarrow$ for a language
+inductively as a set of inference rules.
+
+The first rule is already somewhat surprising, remembering what we said about `skip` in the small-step case:
 $$
-\begin{align}
-& {\color{blue}\\{ x + y = n \\}} \\\\
-& \texttt{while y:} \\\\
-& {\color{blue}\quad\\{x + y = n \land y \neq 0\\}} & {\color{blue}\textrm{by HCons}} \\\\
-& {\color{blue}\quad\\{x + 1 + y - 1 = n \\}} \\\\
-& \quad\texttt{x = x + 1;} \\\\
-& {\color{blue}\quad\\{x + y - 1 = n \\}} & {\color{blue}\textrm{by HAssign}} \\\\
-& \quad\\{x + y - 1 = n \\} \\\\
-& \quad\texttt{y = y - 1 } \\\\
-& \quad\\{x + y = n \\} \\\\
-& {\color{blue}\\{ x + y = n \land y = 0 \\}} & {\color{blue}\textrm{by HWhile}} \\\\
-& {\color{blue}\\{ x = n \\}} & {\color{blue}\textrm{by HCons}}
-\end{align}
+\frac{}
+{(v, \texttt{skip}) \Downarrow v} \\: \textrm{SSkip}
 $$
-and similarly for the second assignment,
-since $(x + y = n)[y-1/y]$ is $x + y - 1 = n$:
+Here we're saying that `skip` _can_ (big-)step,
+whereas in the small-step semantics we said that any state where $c = \texttt{skip}$ is considered terminated and could no longer step.
+This rule is really just the realization of that idea
+in a world where we have to "return" the final value of the program:
+if you start from a state $(v, \texttt{skip})$,
+the final value of the program evaluated from that state is just $v$,
+because it does no more work.
+
+The assignment rule isn't too different from its small-step version:
 $$
-\begin{align}
-& {\color{blue}\\{ x + y = n \\}} \\\\
-& \texttt{while y:} \\\\
-& {\color{blue}\quad\\{x + y = n \land y \neq 0\\}} & {\color{blue}\textrm{by HCons}} \\\\
-& {\color{blue}\quad\\{x + 1 + y - 1 = n \\}} \\\\
-& \quad\texttt{x = x + 1;} \\\\
-& {\color{blue}\quad\\{x + y - 1 = n \\}} & {\color{blue}\textrm{by HAssign}} \\\\
-& {\color{blue}\quad\\{x + y - 1 = n \\}} \\\\
-& \quad\texttt{y = y - 1 } \\\\
-& {\color{blue}\quad\\{x + y = n \\}} & {\color{blue} \textrm{by HAssign}} \\\\
-& {\color{blue}\\{ x + y = n \land y = 0 \\}} & {\color{blue}\textrm{by HWhile}} \\\\
-& {\color{blue}\\{ x = n \\}} & {\color{blue}\textrm{by HCons}}
-\end{align}
+\frac{}
+{(v, x \texttt{ <- } e) \Downarrow v[x \mapsto \[\\!\[ e \]\\!\]_v  ]} \\: \textrm{SAssign}
 $$
-and everything has turned blue, so we're done!
+Just like $\textrm{Assign}$, we're saying that if the whole program is just an assignment statement,
+its final value is just the initial valuation but with $x$ pointing to the result of evaluating $e$.
 
-### Automated proofs and verification conditions
+Here's another big difference from the small-step world: we only need one rule for `seq`, like this:
+$$
+\frac{(v, c_1) \Downarrow v' \quad (v', c_2) \Downarrow v''}
+{(v, c_1 \texttt{; } c_2) \Downarrow v''} \\: \textrm{SSeq}
+$$
+We get away with only needing one rule because we "run" both parts of the `seq` as premises to the rule.
+First, we reduce $c_1$ to its final state $v'$.
+Then, _starting from_ $v'$ we reduce $c_2$ to its final state $v''$.
+Therefore, $v''$ is the final state of running $c_1 \texttt{; } c_2$.
 
-What's cool about this proof compared to ones we did with small-step operational semantics is that
-it's entirely *syntax-guided*:
-we did not have to look at the small-step semantics of IMP at all;
-instead, we just kept applying whichever Hoare logic rule syntactically matched the program.
+The rules for `if` look similar to their small-step counterparts,
+except they follow the example of `seq` in moving the "work" of evaluating $c_1$ or $c_2$ "above the line":
+$$
+\frac{\[\\!\[ e \]\\!\]_v \neq 0 \quad (v, c_1) \Downarrow v'}
+{(v, \texttt{if} \\; e \\; \texttt{then} \\; c_1 \\; \texttt{else} \\; c_2) \Downarrow v'} \\: \textrm{SIfTrue}
+$$
+$$
+\frac{\[\\!\[ e \]\\!\]_v = 0 \quad (v, c_2) \Downarrow v'}
+{(v, \texttt{if} \\; e \\; \texttt{then} \\; c_1 \\; \texttt{else} \\; c_2) \Downarrow v'} \\: \textrm{SIfFalse}
+$$
+In both cases, we're first deciding which side of the `if` to run,
+and then, assuming that side reduces to valuation $v'$,
+so too does the entire expression.
 
-Being syntax-guided is great because it allows for *automation*.
-We can build a *tool* that just looks at the program, starting from the top,
-figures out which rule applies,
-and applies it, doing this recursively until the whole program is verified.
-If it ever reaches a point where the postcondition of a rule
-doesn't match the postcondition of the triple it is trying to prove,
-it uses the rule of consequence to strengthen the postcondition.
-One such tool is called a *verification-condition generator*—it takes a Hoare triple as input
-and return a logical assertion
-that is valid if and only if the Hoare triple is valid.
-Then we can use a tool like a SAT or SMT solver to validate the assertion.
+The rules for `while` are the most complex,
+because we have to somehow deal with running the remaining iterations of the loop:
+$$
+\frac{\[\\!\[ e \]\\!\]_v \neq 0  \quad  (v, c_1) \Downarrow v'  \quad  (v', \texttt{while} \\; e \\; \texttt{do} \\; c) \Downarrow v''}
+{(v, \texttt{while} \\; e \\; \texttt{do} \\; c) \Downarrow v''} \\: \textrm{SWhileTrue}
+$$
+To run a `while` command when the conditional evaluates to true,
+we first evalutate the body a single time to get us to valuation $v'$,
+and then run the whole loop again _starting from $v'$_ to get to a final state $v''$.
+The false side of the rule, meanwhile, just doesn't run anything,
+kind of like $\textrm{SSkip}$:
+$$
+\frac{\[\\!\[ e \]\\!\]_v = 0}
+{(v, \texttt{while} \\; e \\; \texttt{do} \\; c) \Downarrow v} \\: \textrm{SWhileFalse}
+$$
 
-There are two catches.
-First, when applying the rule of consequence,
-the generator needs to prove the logical implication part of the rule—that the strengthened
-postcondition is indeed stronger than the original one.
-The tool can remember these steps as logical assertions to track these obligations.
-The second is specific to `while` loops,
-for which a syntactic approach doesn't quite work,
-because the precondition and postcondition are related—they contain the *loop invariant*.
-Notice that most of the weakening and strengthening we did in this proof
-was to meld things into the shape of the loop invariant.
-This is where automated verification-condition generators most often need external help:
-they need to be told what the loop invariant $I$ should be,
-and once given those, they can generate the necessary logical assertions
-to apply the rule of consequence until the program's pre- and post-conditions fit that shape.
+#### An example execution
 
-Verification-condition generators are a super fascinating area of formal methods,
-though we won't study them more in this class.
-They underpin a bunch of cool cutting-edge programming language tools,
-including [Dafny](https://github.com/dafny-lang/dafny),
-which we *will* study in lecture.
+Above we illustrated small-step semantics on the program `x <- 5; while 1 do (x <- x + 1)`.
+That's not going to work here, just like it didn't work with denotational semantics,
+because there is no final valuation for this non-terminating program.
+Instead, let's study a simpler program:
+```
+x <- 1;
+if x then y <- 1 else y <- 0
+```
 
-## Soundness of Hoare logic
+A convenient way to look at big-step semantics is using a _proof tree_,
+which is kind of like building an interpreter from the semantics
+and illustrating it with the rules that apply each time it recurses.
+Here, the tree looks like this, with apologies for the not-great online typesetting:
 
-We've had a good time blasting out some Hoare logic rules,
-and convinced ourselves that they *seem* right.
-But as PL people we hold ourselves to a higher level of rigor.
-How can we *prove* to ourselves that these rules are *sound*—that constructing a proof
-using these rules is in fact sufficient to prove a property about an IMP program?
+$$
+\frac{
+    {\Large
+    \frac{}
+    {(\emptyset, \texttt{x <- 1}) \Downarrow \\{ x \mapsto 5 \\}}} \\: \textrm{SAssign}
+    \quad\quad
+    {\Large
+    \frac{
+        \[\[ \texttt{x} \]\]_v \neq 0
+        \quad\quad
+        {\Large
+        \frac{}
+        {(\\{ x \mapsto 5 \\}, \texttt{y <- 1}) \Downarrow \\{x \mapsto 5, y \mapsto 1\\}}} \\: \textrm{SAssign}
+    }
+    {(\\{ x \mapsto 5 \\}, \texttt{if x then y <- 1 else y <- 0}) \Downarrow \\{x \mapsto 5, y \mapsto 1\\}}} \\: \textrm{SIfTrue}
+}
+{(\emptyset, \texttt{x <- 1; if x then y <- 1 else y <- 0}) \Downarrow \\{x \mapsto 5, y \mapsto 1\\}} \\: \textrm{SSeq}
+$$
 
-The theorem appeals to the big-step semantics of IMP
-(since we care only about terminating programs for partial correctness)
-and looks something like this:
+To conclude that our program evaluates to the final state $\\{x \mapsto 5, y \mapsto 1\\}$,
+we recursively applied big-step inference rules until every rule was an axiom or a non-recursive premise.
 
-**Theorem**: If $\\{ P \\} c \\{ Q \\}$, and $(v, c) \Downarrow v'$, and $P(v)$,
-then $Q(v')$.
+### Big-step semantics as a relation
 
-**Proof**: By induction on the derivation of $\\{ P \\} c \\{ Q \\}$.
+The idea of the big-step $\Downarrow$ relation should remind you of denotational semantics—it gives us a way to talk about
+the final result of a computation directly, rather than working through a sequence of small steps to get to it.
+But unlike the denotational semantics we've seen,
+big step semantics can at least be *defined* for languages that might not terminate.
+When we tried to define denotational semantics for (a subset of) IMP in [Week 03](@/notes/week03/_index.md),
+we saw that it was very difficult to write down a well-founded definition for `while` loops,
+because the function we defined might recurse infinitely.
 
-There are six cases, one per rule. Most of them are easy and just appeal to the big-step semantics directly. For example, here's the case for $\textrm{HIf}$:
+Here, we can still define $\Downarrow$ for `while` loops
+because it is a _relation_ between $(v, c)$ pairs and their final values.
+It's OK for a relation not to ascribe a value to every element in the domain
+(indeed, that's one side of what it means for a relation to *be* a function:
+a function is a relation that maps *every* element of its domain to *exactly one* element of its codomain).
+So here, we can still talk about $\Downarrow$ for `while`,
+with the understanding that for non-terminating programs $c$,
+there is _no_ final valuation $v'$ such that $(v, c) \Downarrow v'$.
 
-> Suppose the theorem is true for the triples $\\{ P \land [\\![ e ]\\!] \neq 0 \\} \\: c_1 \\: \\{ Q \\}$ and $\\{ P \land [\\![ e ]\\!] = 0 \\} \\: c_2 \\: \\{ Q \\}$.
-> We must prove it for the triple $\\{ P \\} \\: \texttt{if } e \texttt{ then } c_1 \texttt{ else } c_2 \\: \\{ Q \\}$.
->
-> Let $v$ and $v'$ be states such that $P(v)$ is true, $(v, \texttt{if } e \texttt{ then } c_1 \texttt{ else } c_2) \Downarrow v'$,
-> and the triple $\\{ P \\} \\: \texttt{if } e \texttt{ then } c_1 \texttt{ else } c_2 \\: \\{ Q \\}$ is valid.
-> By rule inversion, we know that $\\{ P \land [\\![ e ]\\!] \neq 0 \\} \\: c_1 \\: \\{ Q \\}$ and $\\{ P \land [\\![ e ]\\!] = 0 \\} \\: c_2 \\: \\{ Q \\}$
-> are also true.
-> Now consider two cases:
-> * If $[\\![ e ]\\!]_v \neq 0$, then by rule inversion on the $\Downarrow$ rule $\textrm{SIfTrue}$,
->   we know that $(v, c_1) \Downarrow v'$. Then by the inductive hypothesis, we know that $Q(v')$.
-> * If $[\\![ e ]\\!]_v = 0$, then by rule inversion on the $\Downarrow$ rule $\textrm{SIfFalse}$,
->   we know that $(v, c_2) \Downarrow v'$. Then by the inductive hypothesis, we know that $Q(v')$.
->
-> In both cases, we found that $Q(v')$ holds, and so we are done.
+Similarly, the big-step semantics relation also still lets us talk about non-determinism;
+it's OK for a relation to ascribe *more than one* value to an element of the domain.
+If $(v, c) \Downarrow v_1$ and $(v, c) \Downarrow v_2$, where $v_1 \neq v_2$,
+then the program $c$ is non-deterministic.
+That said, *defining* a big-step semantics for concurrency, for example,
+is quite tricky.
+Concretely, it's not easy to write down an equivalent to the $\textrm{ParL}$ and $\textrm{ParR}$ rules we wrote above,
+because big steps don't really give us a way to *interleave* steps of each side of the `||` operator.
 
-The only interesting case is $\textrm{HWhile}$. 
-Let $I$ be a property, and suppose the theorem holds for $\\{ I \land [\\![ e ]\\!] \neq 0 \\} \\: c \\: \\{ I \\}$.
-We must prove it for the triple $\\{ I \\} \\: \texttt{while } e \texttt{ do } c \\: \\{ I \land [\\![ e ]\\!] = 0 \\}$.
-By rule inversion, we know that $\\{ I \land [\\![ e ]\\!] \neq 0 \\} \\: c \\: \\{ I \\}$ holds.
-By the inductive hypothesis, then,
-if $v$ and $v'$ are states such that $I(v)$ is true,
-$[\\![ e ]\\!] \neq 0$,
-and $(v, c) \Downarrow v'$,
-then $I(v')$ is also true.
+### Equivalence of big-step and small-step semantics
 
-Now we need a small lemma about the invariants:
+Now that we've given two different semantics for IMP,
+it would be nice to know that they are "the same",
+for some suitable definition of equivalence.
+I'm going to elide the proofs because they're a bit tedious,
+but the idea goes something like this:
 
-> **Lemma**: If $(v, \texttt{while } e \texttt{ do } c) \Downarrow v'$ and $I(v)$ then $I(v') \land [\\![ e ]\\!]_v = 0$.
->
-> **Proof**: By induction on the derivation of $\Downarrow$.
+**Theorem**: If $(v, c) \Downarrow v'$, then $(v, c) \rightarrow^\* (v', \texttt{skip})$.
 
-To finish the proof, suppose $v$ and $v'$ are states such that $I(v)$ is true and $(v, \texttt{while } e \texttt{ do } c) \Downarrow v'$.
-Then by the lemma, we get that $I(v') \land [\\![ e ]\\!]_v = 0$,
-which is exactly the postcondition of the triple that we needed to prove.
+**Proof**: By induction on the proposition $\Downarrow$.
+
+The other direction is also by induction, but needs a strengthened lemma to go through.
+
+**Lemma**: If $(v, c) \rightarrow^* (v', c')$ and $(v', c') \Downarrow v''$, then $(v, c) \Downarrow v''$.
+
+**Proof**: By induction on the proposition $\rightarrow^*$.
+
+**Theorem**: If $(v, c) \rightarrow^\* (v', \texttt{skip})$, then $(v, c) \Downarrow v'$.
+
+**Proof**: Apply the previous lemma with $c' = \texttt{skip}$, since $(v', \texttt{skip}) \Downarrow v'$.
+
+## Big steps or small?
+
+Why bother with both these approaches?
+My sense is that small-step operational semantics are the most common approach to modern programming language semantics,
+in large part because they let us talk about concurrency and non-termination comfortably.
+I also think small-step semantics is more *interesting*,
+because it gives as an additional dimension to think about when formalizing a language:
+how small should the steps be?
+The right answer to that question might often depend on what we want to use the semantics for,
+which is a Big PL Idea—we can design the semantics *for* the problem we want to solve,
+making our lives much easier.
+
+But hopefully seeing both gives a sense of the spectrum of semantics approaches we've seen so far:
+big-step semantics sit somewhere between denotational and small-step in terms of both convenience and expressiveness.
+They give us the ability to at least formalize a semantics for a language that allows non-terminating programs,
+and to do some reasoning about programs in that language so long as they terminate.
+
+On a less fundamental but still interesting note,
+big-step semantics are more convenient that denotational semantics
+from the perspective of a proof assistant like Coq,
+which leans heavily into (inductively defined) propositions as the way to formalize the world.
+Interpreters don't give rise to a natural definition in this style,
+but big-step semantics do.
+In some sense, big-step semantics are the *canonical way* to formalize interpreters in Coq,
+rather than the function-oriented approach we studied in [Week 03](@/notes/week03/_index.md).
+

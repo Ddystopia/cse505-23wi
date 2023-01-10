@@ -3,20 +3,16 @@ Require Import Arith Lia List String.
 Import ListNotations.
 Open Scope string.
 
-(* enable type inference *)
 Set Implicit Arguments.
 
-(* the type of an "equality decider" *)
 Definition eq_dec (A : Type) :=
   forall (x : A),
     forall (y : A),
       {x = y} + {x <> y}.
 
-(* We'll continue to use strings for variable names. *)
 Notation var := string.
 Definition var_eq : eq_dec var := string_dec.
 
-(* We'll also continue to associate variables with nats in valuations. *)
 Definition valuation := list (var * nat).
 
 Fixpoint lookup (x : var) (v : valuation) : option nat :=
@@ -28,8 +24,6 @@ Fixpoint lookup (x : var) (v : valuation) : option nat :=
     else lookup x v'
   end.
 
-(* And we'll continue to use our arithmetic expression language.
-   Here's the arith syntax: *)
 Inductive arith : Set :=
 | Const (n : nat)
 | Var (x : var)
@@ -37,7 +31,6 @@ Inductive arith : Set :=
 | Minus (e1 e2 : arith)
 | Times (e1 e2 : arith).
 
-(* And its semantics via an interpreter: *)
 Fixpoint eval_arith (e : arith) (v : valuation) : nat :=
   match e with
   | Const n => n
@@ -51,7 +44,6 @@ Fixpoint eval_arith (e : arith) (v : valuation) : nat :=
   | Times e1 e2 => eval_arith e1 v * eval_arith e2 v
   end.
 
-(* Finally, we'll also copy over our arith notations. *)
 Declare Scope arith_scope.
 Coercion Const : nat >-> arith.
 Coercion Var : var >-> arith.
@@ -171,31 +163,14 @@ CREDITS: This formalization also follows the development from Chlipala's
 excellent FRAP textbook: http://adam.chlipala.net/frap/
 *)
 
-(*
-Now let's move on to formalizing an imperative programming language with
-unbounded loops. Since programs in our language are not guaranteed to terminate,
-we won't be able to model its semantics using an interpreter because every
-function in Coq must always terminate on all inputs (crucial for soundness!).
-Instead we'll see how to *relationally* specify the meaning of programs in our
-language using "operational semantics".
-
-First we need to give the syntax of our language:
-*)
+(* Syntax of Imp. *)
 Inductive cmd :=
 | Skip
 | Assign (x : var) (e : arith)
 | Sequence (c1 c2 : cmd)
-| If (e : arith) (then_ else_ : cmd)
-| While (e : arith) (body : cmd).
+| If (e : arith) (then_ else_ : cmd) (* new this week (but nothing fundamental) *)
+| While (e : arith) (body : cmd). (* new this week (and fundamentally different!) *)
 
-(*
-This is very similar our "cmd" language from Week03, but we added an "If"
-command and swapped the bounded "Repeat" loops out for an unbounded form of
-"While" loops.
-
-We will also define notations to make it easier for humans to read and write
-"cmd" programs, similar to our notations for arithmetic expressions.
-*)
 Notation "x <- e" := (Assign x e%arith) (at level 75).
 Infix ";;" := Sequence (at level 76). (* ;; instead of ; because it interferes
                                          with record syntax *)
@@ -204,11 +179,7 @@ Notation "'when' e 'then' then_ 'else' else_ 'done'" :=
 Notation "'while' e 'loop' body 'done'" :=
   (While e%arith body) (at level 75).
 
-(*
-So far, we've only specified the *syntax* of our imperative language. Now let's
-move on to its *semantics*. We'll specify a step relation for how "cmd"s
-execute. Looks a lot like a transition relation doesn't it?
-*)
+(* Translate our long horizontal lines to an inductive definition. *)
 Inductive step : valuation * cmd -> valuation * cmd -> Prop :=
 | StepAssign :
     forall v x e v',
@@ -238,6 +209,20 @@ Inductive step : valuation * cmd -> valuation * cmd -> Prop :=
       eval_arith e v = 0 ->
       step (v, While e body) (v, Skip).
 
+Definition counter :=
+  "x" <- 5;;
+  while 1 loop
+    "x" <- "x" + 1
+  done.
+
+Example counter_steps_10_times :
+  exists v,
+    trc step ([], counter) (v, while 1 loop
+                                  "x" <- "x" + 1
+                               done) /\
+    lookup "x" v = Some 15.
+Proof.
+Admitted.
 
 (* Here's our old friend the factorial program. *)
 Definition factorial : cmd :=
@@ -249,48 +234,17 @@ Definition factorial : cmd :=
   done;;
   "output" <- "acc".
 
-(*
-We can use the step relation to reason about this version of factorial just like we
-did in week 4, except that now the steps are *much* finer grained. In week 4, we
-had one step per iteration of the main loop, and no other kinds of steps. But
-now, we have separate steps for roughly every line of code. As a general rule,
-finer grained steps make proofs more annoying :)
-
-Let's start with a "unit test", proving that factorial returns 24 when given 4.
-(There's a problem like this on HW3. Be sure to read the better proofs below.
-*)
 Example factorial_4 :
   forall v1,
     lookup "input" v1 = Some 4 ->
     exists v2,
       trc step (v1, factorial) (v2, Skip) /\
       lookup "output" v2 = Some 24.
-(*
-Reading this theorem statement, it says if we start in any valuation v1 where
-the input is 4, then there exists a final valuation v2 such that factorial
-terminates (i.e., steps to Skip) in valuation v2 and such that the output is 24.
-
-Sounds pretty straightforward. What do we need to prove it? At the end of the
-day, we need to give a "witness" for v2, and then show that (v1, factorial)
-steps to (v2, Skip) and that v2 maps "output" to 24. What is v2? If you think
-about it, it's actually pretty complicated, because it consists of a trace of
-every single assignment statement ever executed by factorial on this run. So if
-we were to try to write it down explicitly using "exists blah.", it would be
-super annoying. Luckily, eexists will allow us to implicitly "compute" v2 by
-doing the rest of the proof. Check it out!
-*)
 Proof.
   intros v1 H.
-  eexists. (* Put in a placeholder for v2 for now. *)
+  eexists.
   split.
-  - (* The interesting part of the proof is proving that factorial terminates in
-       (v2, Skip). We need to build up a derivation tree for trc, where each
-       single step is also justified by a derivation tree of step.
-
-       The first step is to execute the very first assignment statement in the
-       program, "n" <- "input". Since this statement is "inside" several, Seq
-       nodes, we have several applications of StepSeqLStep to get down there. *)
-    eapply trc_front.
+  - eapply trc_front.
     apply StepSeqLStep.
     apply StepSeqLStep.
     apply StepSeqLStep.
@@ -429,13 +383,6 @@ Proof.
     reflexivity.
 Qed. (* Nailed it, only 130 ish tactics. Lots of copy paste! *)
 
-(*
-Okay, that was supposed to be a "unit test", but it was a huge pain! This is
-partially because proving "specific" theorems is more tedious than proving
-"general" theorems. But we can also improve the situation using some automated
-tactics.
-*)
-
 (* like econstructor, but avoid StepWhileTrue b/c infinite tactic loops *)
 Ltac step_easy :=
   repeat (
@@ -557,70 +504,18 @@ Proof.
   - reflexivity.
 Qed.
 
-(*
-We can also use the transition relation to reason about executions of the
-program on *all* possible inputs, by constructing a transition system. We need
-to answer the three questions: state space, initial states, and transition
-relation. The key idea is:
-
-    The code "left to execute" is part of the state.
-
-The other piece of state will be the valuation. As the program executes, the
-code "left to execute" evolves. If the program terminates, then eventually the
-code left to execute will become Skip. Otherwise, it will just continue evolving
-over time. If you like to think low level, you can think of the code left to
-execute as tracking the "program counter", since it tells you what to do next.
-
-All of this leads us to realizing our state space is (valuation * cmd). The
-definition of step above already gives us our transition relation on this state
-space, so we just need the initial states.
-
-Given a particular starting valuation and a particular program we want to
-execute, we can make a "singleton set" of initial states just one pair,
-consisting of that valuation and program.
-*)
 Definition cmd_init (v : valuation) (c : cmd) (s : valuation * cmd) : Prop :=
   s = (v, c).
 
-(*
-Then we can "compute" the entire transition system from a starting valuation and
-program by using cmd_init as the initial states, and using step as the
-transition relation.
-
-One interesting aspect of this definition is that cmd_init is parameterized on
-the valuation and command, but step is not. In other words, every transition
-system returned by cmd_to_trsys has the *same* transition relation! But they
-will have different initial states. If you think about the pictures we drew for
-transition systems, this might tickle your sixth sense for inductiveness. There
-are many transitions that are not reachable from the initial states (since the
-transition relation captures the execution of all possible programs from all
-possible valuations!!), so we will need a quite strong invariant to make
-anything inductive (in order to rule out most programs and valuations, since
-they will not be reachable from our initial state). More on that later.
-*)
 Definition cmd_to_trsys (v : valuation) (c : cmd) : trsys (valuation * cmd) :=
   {| Init := cmd_init v c
    ; Step := step
    |}.
 
-(*
-
-Let's switch to a simpler example. We will come back to factorial below.
-*)
-
-Definition counter :=
-  "x" <- 5;;
-  while 1 loop
-    "x" <- "x" + 1
-  done.
 
 Definition counter_sys : trsys (valuation * cmd) :=
   cmd_to_trsys [] counter.
 
-(*
-Let's prove x is always at least 5. Here's our first attempt at stating this
-property.
-*)
 Definition counter_ge_5_attempt (s : valuation * cmd) :=
   let (v, c) := s in
   exists x,
@@ -634,9 +529,6 @@ Proof.
   (* Uh oh, this just isn't true initially! x is not mapped to anything yet. *)
 Abort.
 
-(*
-Let's try again. We can say "either we haven't started yet, or x is >= 5".
-*)
 Definition counter_ge_5 (s : valuation * cmd) :=
   let (v, c) := s in
   c = counter \/
@@ -651,17 +543,11 @@ Proof.
   - auto.
   - destruct s1 as [v1 c1], s2 as [v2 c2].
     destruct IH as [IH|IH].
-    + (* Here we are about to take the first step. No problem! *)
-      subst.
+    + subst.
       inversion Hstep; subst; clear Hstep.
       inversion H0; subst; clear H0.
-      (* We just set x to 5, so it's easy to show the right disjunct. *)
       cbn. eauto.
-    + (* In the second case, we know that x is >= 5, and now we take a step.
-         But since our invariant says nothing about c1, we're stuck. In
-         principle, c1 could be literally any program that could do anything to
-         x. But we know actually c1 should be a program that arises during
-         execution of the counter program. What are those programs? *)
+    +
 Abort.
 
 Definition counter_programs (s : valuation * cmd) :=
@@ -686,28 +572,17 @@ Proof.
   invariant_induction_boilerplate.
   - auto.
   - destruct s1 as [v1 c1], s2 as [v2 c2].
-    (* intuition is a great tactic for busting up a bunch of disjunctions *)
     intuition; subst; inversion Hstep; subst; clear Hstep; auto.
     + inversion H0; subst; clear H0. auto.
     + inversion H0; subst; clear H0.
     + inversion H0; subst; clear H0. auto.
 Qed.
 
-(*
-Building on this idea, we can also make our invariant talk about the valuations,
-not just the programs. This will let us prove x >= 5.
-*)
-
-(* First, here is the only fact we ever need about the valuation. *)
 Definition counter_valuation_x_ge_5 (v : valuation) :=
   exists x,
     lookup "x" v = Some x /\
     x >= 5.
 
-(*
-Then we can just paste this into every branch except the very first one,
-where x is not yet initialized.
-*)
 Definition counter_programs_x_ge_5 (s : valuation * cmd) :=
   let (v, c) := s in
   c = counter \/
@@ -741,7 +616,6 @@ Proof.
       split; auto. eexists. split; auto. lia.
 Qed.
 
-(* Finally, our theorem follows. *)
 Theorem counter_ge_5_invariant :
   is_invariant counter_sys counter_ge_5.
 Proof.
@@ -752,18 +626,6 @@ Proof.
     intuition.
 Qed.
 
-(*
-It's worth reflecting on what just happened. Last week, when we manually modeled
-the counter system as a transition system, the invariant x >= 0 was inductive.
-This week, it wasn't even an invariant!! (Since it wasn't true in the initial
-state.) Even after fixing that problem so that the property was an invariant,
-it still wasn't inductive, this time because it said nothing about the program
-syntax. The moral of the story is that when using a finer-grained step relation
-with many more states, your invariant has to say more to "get rid" of all that
-extra generality.
-*)
-
-(* Ok back to factorial. *)
 Definition factorial_sys (input : nat) : trsys (valuation * cmd) :=
   cmd_to_trsys [("input", input)] factorial.
 
@@ -773,9 +635,6 @@ Fixpoint fact (n : nat) : nat :=
   | S n' => fact n' * S n'
   end.
 
-(*
-Let's prove that when the program terminates, it computes the right answer.
-*)
 Definition factorial_safe (input : nat) (s : valuation * cmd) : Prop :=
   let (v, c) := s in
   c = Skip ->
@@ -785,15 +644,7 @@ Theorem factorial_safe_invariant :
   forall input,
     is_invariant (factorial_sys input) (factorial_safe input).
 Proof.
-  (* Laughably not inductive. factorial_safe says nothing unless c = Skip.
-     We're not even going to try to prove it by induction because it would be
-     hopeless *)
 Abort.
-
-(*
-Just like with the counter system, our invariant now needs to constrain the
-"reachable programs". There are many of them, so we give them all shorter names.
-*)
 
 Definition factorial_after_step_one :=
   Skip;;
@@ -860,43 +711,23 @@ Definition factorial_after_loop :=
 Definition factorial_last_step :=
   "output" <- "acc".
 
-(*
-For each reachable program, we also need to make an assertion about the
-valuation. We also give all the assertions shorter names.
-*)
-
-(* Here's the main loop invariant. *)
 Definition factorial_loop_invariant input v :=
   exists n acc,
     lookup "n" v = Some n /\
     lookup "acc" v = Some acc /\
     fact n * acc = fact input.
 
-(*
-After we evaluate the loop exit condition, if we plan to enter the loop, we
-learn that n is nonzero.
-*)
 Definition factorial_body_invariant input v :=
   exists n acc,
     lookup "n" v = Some (S n) /\
     lookup "acc" v = Some acc /\
     fact (S n) * acc = fact input.
 
-(*
-After executing the first statement in the loop body, we have this intermediate
-assertion.
-*)
 Definition factorial_body_invariant_after_step input v :=
   exists n acc,
     lookup "n" v = Some (S n) /\
     lookup "acc" v = Some acc /\
     fact n * acc = fact input.
-
-(*
-Now the global invariant for the whole transition system. It says that the
-command must be one of the reachable programs above. For each program, we also
-constrain the valuation with the corresponding assertion.
-*)
 
 Definition factorial_inv (input : nat) (s : valuation * cmd) : Prop :=
   let (v, c) := s in
@@ -912,23 +743,8 @@ Definition factorial_inv (input : nat) (s : valuation * cmd) : Prop :=
   (c = factorial_last_step /\ lookup "acc" v = Some (fact input)) \/
   (c = Skip /\ lookup "output" v = Some (fact input)).
 
-(*
-At this point, we can see how this invariant corresponds to labeling each
-statement with an "invariant assertion" that is true every time control flow
-reaches that point. This technique is called "the method of invariant
-assertions" and is one of the earliest approaches to program verification.
-*)
-
-(*
-A very common shorthand tactic for doing inversion, substituting by all the
-equalities, and deleting the original hypothesis.
-*)
 Ltac invc H := inversion H; subst; clear H.
 
-(*
-Now let's prove our invariant is an invariant by induction. In this first
-version of the proof, we will use relatively little automation.
-*)
 Lemma factorial_inv_invariant :
   forall input,
     is_invariant (factorial_sys input) (factorial_inv input).
@@ -981,45 +797,31 @@ Proof.
     + invc Hstep.
 Qed.
 
-(* Call invc on a hypothesis that something steps. *)
 Ltac invert_one_step :=
   match goal with
   | [ H : step _ _ |- _ ] => invc H
   end.
 
-(* Call invert_one_step over and over until nothing is left to do. *)
 Ltac invert_steps :=
   repeat invert_one_step.
 
-(*
-This tactic is specific to the shape of the invariant above, which is a big
-disjunction of conjunctions. The tactic tries to guess which disjunct is
-correct by looking for a disjunct whose first *conjunct* is provable by
-reflexivity.
-*)
 Ltac magic_select_case :=
   repeat match goal with
   | [ |- _ \/ _ ] => (left; split; [reflexivity|]) || right
   | _ => try split; [reflexivity|]
   end.
 
-(* Destruct all hypotheses that are "exists" or "/\". *)
 Ltac break_up_hyps :=
   repeat match goal with
   | [ H : exists _, _ |- _ ] => destruct H
   | [ H : _ /\ _ |- _ ] => destruct H
   end.
 
-(*
-Rewrite left-to-right everywhere by all (unquantified) hypotheses as many
-times as possible.
-*)
 Ltac find_rewrites :=
   repeat match goal with
   | [ H : _ = _ |- _ ] => rewrite H in *
   end.
 
-(* Here's a more automated version. *)
 Lemma factorial_inv_invariant_again :
   forall input,
     is_invariant (factorial_sys input) (factorial_inv input).
@@ -1027,23 +829,7 @@ Proof.
   invariant_induction_boilerplate.
   - auto.
   - destruct s1 as [v1 c1], s2 as [v2 c2].
-    (* when the goal is huge, tactic performance suffers, so fold it up. *)
     fold (factorial_inv input (v2, c2)).
-    (* Here's a huge tactic block.
-       - intuition breaks up disjunctions and conjunctions in the context, so
-         we get one subgoal for each reachable program
-       - invert_steps determines the possible next steps for each subgoal
-         - for most subgoals, there is exactly one next step
-         - when we are at the top of the loop, there are two:
-           - one for entering the loop body
-           - one for exiting the loop
-         - when we are at the very end (Skip), there are zero next steps
-       - we then unfold a bunch of stuff
-       - magic_select_case finds the disjunct in the goal corresponding to the
-         correct next step
-       - then we clean up the context and try a huge eauto
-         (20 is the search depth)
-     *)
     intuition; subst; invert_steps;
     unfold factorial_inv;
     unfold factorial_loop_invariant, factorial_body_invariant in *;
@@ -1053,34 +839,18 @@ Proof.
     cbn in *;
     find_rewrites;
     eauto 20.
-    (* What remains is 5 "interesting" subgoals. *)
-    + (* The program reaches the top of the loop for the very first time. We
-         need to establish the loop invariant. *)
-      eexists. eexists.
+    + eexists. eexists.
       split; eauto. split; eauto. lia.
-    + (* The program evaluates the loop condition and finds it true, so prepares
-         to enter the loop body. We "remember" the fact that n is nonzero. *)
-      destruct x; [congruence|]. (* note: destruct before exists *)
+    + destruct x; [congruence|]. (* note: destruct before exists *)
       eauto.
-    + (* The program evaluates the loop condition and finds it false, so exits
-         the loop. We need to use the loop invariant to establish the assertion
-         after the loop. *)
-      subst.
+    + subst.
       cbn in *. rewrite <- H1. f_equal. lia.
-    + (* In the body of the loop, the program assigns to acc. We need to
-         establish the intermediate assertion. *)
-      eexists. eexists. split; eauto. split; eauto.
+    + eexists. eexists. split; eauto. split; eauto.
       rewrite <- H1. cbn. lia.
-    + (* The program finishes the second statement in the loop body. We need to
-         re-establish the loop invariant. *)
-      eexists. eexists. split; eauto. split; eauto.
+    + eexists. eexists. split; eauto. split; eauto.
       cbn. rewrite <- H1. f_equal. f_equal. lia.
 Qed.
 
-(*
-As usual, once we have an inductive invariant, proving our original "safety"
-claim is a straightforward application of invariant_implies.
-*)
 Theorem factorial_safe_invariant :
   forall input,
     is_invariant (factorial_sys input) (factorial_safe input).
@@ -1094,8 +864,7 @@ Proof.
     intuition; discriminate.
 Qed.
 
-
-Lemma deconstruct_sequence_execution :
+Lemma decompose_sequence_execution :
   forall v v' c1 c2 c',
     trc step (v, c1;; c2) (v', c') ->
     exists v1' c1',
@@ -1253,7 +1022,7 @@ Ltac induct_trc_step H :=
   prepare_induct_trc_step H;
   induction H; intros; subst.
 
-Lemma deconstruct_while_execution :
+Lemma decompose_while_execution :
   forall v v' e c c',
     trc step (v, while e loop c done) (v', c') ->
     exists v1,

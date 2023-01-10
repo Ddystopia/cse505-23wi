@@ -1,342 +1,521 @@
 +++
-title = "Week 03 - Transition Systems: Inductive Invariants"
+title = "Week 03 - Arith: Abstract Syntax; Semantics via Interpreters"
 +++
 
-# Week 03 - Transition Systems: Inductive Invariants
+# Week 03 - Arith: Abstract Syntax; Semantics via Interpreters
 
 _These notes were written by primarily by Prof. James Bornholt for his course at
 UT Austin. James is a PhD alum of UW and "friend of the channel", and we thank
 him for permission to reuse and adapt these notes back at UW!_
 
-We concluded [Week 02](@/notes/week02/_index.md) by seeing some limitations of denotational semantics,
-and in particular, we saw that they struggle with non-terminating programs.
-We're going to see a solution to this problem in the form of *operational semantics*,
-which define the meaning of programs as *transitions* between states.
-But before we get there, we need to build up some infrastructure about *transition systems*,
-the foundation we'll use to define operational semantics.
+In [Week 02](@/notes/week02/_index.md), we learned that any formalization of a programming language
+has two components:
+1. **Syntax** defines what programs *are*—their "shape" or "structure".
+2. **Semantics** defines what programs *mean*—how they behave, how they evaluate.
 
-## Definition of a transition system
+We saw that we can represent the syntax of a program as an *abstract syntax tree* (AST),
+an algebraic data type that reflects the shape of the program.
+Syntax is, for our purposes, the "easy" part of defining a programming language—ASTs strip away
+many of the complexities of modern programming language syntax and leave us with a simple essence.
+Most compilers use some sort of AST or other *intermediate representation* to separate syntax from semantics.
 
-A transition system is (for our purposes) a way to model programs in terms of small *steps* the program can take
-through a space of *states* the program can be in.
-We'll refine this notion shortly, but for now a rough analogy is to think of a state as "all the variables in the program".
-For example, consider this program:
+This lecture starts our exploration of *semantics*, the "hard" part of defining a programming language.
+Broadly speaking, there are three established techniques for defining the semantics of a programming language:
+1. *Denotational semantics* defines a program's meaning using mathematical functions
+2. *Operational semantics* defines a program's meaning using transitions between states of an abstract machine
+3. *Axiomatic semantics* defines a program's meaning in terms of logical assertions satisfied during execution
+
+None of these techniques is the "right one"; they each have pros and cons,
+and often a formalization will combine more than one of these approaches. We're going to spend the
+next few weeks studying each of these approaches in some detail.
+The goal is for you to be able to identify when each model of semantics is useful
+*and* to be able to do proofs about all three styles.
+
+This lecture covers *denotational semantics*, which (in my opinion) is the simplest of the three approaches,
+but also has the most limitations. Nonetheless, it can be a very useful tool for reasoning about programs,
+especially those in functional programming languages or that are otherwise recursion-oriented.
+
+## An interpreter for expressions
+
+In the last lecture we defined a simple expression language as an ADT. Let's look at an even simpler
+version of that expression language:
+
 ```
-x = 5
-while True:
-    x = x + 1
+expr := Const nat
+      | Plus expr expr
+      | Times expr expr
 ```
-We can model each iteration of this loop as a single *step*,
-and the *state* of the program to be the value of variable `x`.
-So this program starts in state `5`,
-then steps once to state `6`,
-steps again to state `7`,
-and so on.
-In fact, this program continues stepping like this *forever*.
-This is a contrast to the challenges we had earlier with denotational semantics—even though this
-program never terminates, we can still say things about its behavior at each "step".
 
-What we just did in words is define a **transition system** for this program.
-More formally, a transition system is three things:
-1. A set of *states* $S$
-2. A set of *initial states* $S_0$ such that $S_0 \subseteq S$
-3. A *transition relation* $\rightarrow$ over $S \times S$
+We know that syntactically, these two programs are not equal:
+1. `Plus (Const 1) (Const 1)`
+2. `Const 2`
 
-A quick note on notation: a (binary) *relation* is just a set of pairs of elements.
-For example, inequality $a < b$ is a binary relation over the natural numbers;
-the relation is the set $\\{ (a, b)\\\: |\\\: a < b \\} \subset \mathbb{N} \times \mathbb{N}$.
-In our case,
-a transition relation is just a subset of the set $S \times S$ that relates states to other states.
-We write $s_1 \rightarrow s_2$ to mean that the pair $(s_1, s_2)$ is in this subset,
-and we read this as "$s_1$ *steps to* $s_2$".
+But any intuitive semantics for this language should have them *evaluate* to the same result.
+Let's see how we can define a semantics that ensures this equivalence.
 
-Now we can define our informal transition system for the above program a little more formally:
-the set $S$ of states is $\mathbb{N}$ (all values that $x$ could take),
-the set $S_0$ of initial states is the singleton $\\{ 5\\}$,
-and the transition relation is $\rightarrow \\;  = \\{ (n, n+1) \\\: | \\\: n \in \mathbb{N} \\}$.
-Notice that this definition is not especially precise;
-we can see by inspection that the program can never reach the state `4`,
-for example, but $4 \in S$.
-Similarly, $(4, 5) \in \\; \rightarrow$ but we know the program can never make that step.
-That's OK! Defining these problems away would be fairly easy in this case,
-but for general programs it's very hard to write down precise definitions for these sets.
-This imprecision doesn't affect the correctness or precision of our transition system when looked at as a whole,
-which we can see by having a notion of *reachability*.
+A **denotational semantics** for a programming language is a function $D: \mathrm{Syntax} \rightarrow \mathrm{Semantics}$
+that takes as input a program syntax (for us, that means an AST)
+and returns a value (sometimes called a *denotation*) that the program evaluates to.
+In other words, a denotational semantics defines meaning as a function over the program's AST,
+in the same sense as we were defining functions over ADTs in the previous lecture.
 
-### Reachability in a transition system
-
-What are the states that our transition system above can ever arrive at?
-This is a useful idea to be able to talk about,
-because we often want to state properties about all states.
-
-First, let's extend our notation a little bit to talk about *paths* through the transition system
-rather than single steps.
-We defined the transition relation $s_1 \rightarrow s_2$ to mean that $s_1$ steps to $s_2$ in exactly one step.
-We can introduce a new notation $s_1 \rightarrow^* s_2$ to mean that $s_1$ steps to $s_2$ in *any number of steps*.
-Importantly, this *includes zero steps*: $s_1 \rightarrow^* s_1$ is *always true*, but whether $s_1 \rightarrow s_1$ is true depends on the particular transition system. 
-We sometimes read $a \rightarrow^* b$ as "$a$ step stars to $b$", or as "$a$ can reach $b$".
-(For the formally inclined, $\rightarrow^*$ is the *reflexive transitive closure* of the relation $\rightarrow$.)
-
-For example, in our simple transition system above, we know that $5 \rightarrow 6$ and $6 \rightarrow 7$,
-and so we know that $5 \rightarrow^* 7$ (we can step from `5` to `7` in two steps),
-but $5 \not\rightarrow 7$ as we cannot reach `7` in exactly one step from `5`.
-Note that we haven't yet disposed of our imprecision above:
-$1 \rightarrow^* 4$ is true even though neither state is reachable in our actual program,
-as all the transition system says is that *starting from state `1`* it is possible to reach `4` (in three steps, in fact).
-
-But now we have the tools we need to define **reachability**:
-a state $s$ is *reachable* if there exists an initial state $s_0 \in S_0$ such that $s_0 \rightarrow^* s$.
-Now we can dispense with the "imprecise" states:
-for example, the state `3` is not *reachable* in our transition system,
-because even though there exist some states such that $s \rightarrow^* 3$,
-there does not exist any *initial state* where this is true.
-On the other hand, the state `7` is reachable in our transition system,
-because $5 \rightarrow^* 7$ and $5 \in S_0$.
-
-## Invariants in transition systems
-
-Let's use our definitions to do something interesting.
-You probably already have some informal notion of an "invariant" in a program:
-a property that is *always true* while the program (or some piece of the program) executes.
-Invariants are sometimes written as an assertion.
-For example, let's extend our program from earlier with an invariant:
-```
-x = 5
-while True:
-    assert x >= 5
-    x = x + 1
-```
-Hopefully it is clear that this assertion is in fact an invariant of this program.
-But what does that mean formally?
-A **property** of a transition system is just a *set of states* $P \subseteq S$ (equivalently, a predicate over states).
-Then an **invariant** of a transition system is a property $I$ such that $R \subseteq I$,
-where $R$ is the set of reachable states of the system.
-In other words, an invariant is a property is that is true in every *reachable* state of the program.
-It might be true in other states, too, but that doesn't matter for invariance; only the reachable states matter.
-We sometimes call the set of states that satisfy an invariant the set of "safe" states,
-as often invariants are propertys about something that must be true for the program to be "good".
-
-A few examples:
-* Our assertion `x >= 5` *is* an invariant of the system:
-  the property is $\\{ x \in \mathbb{N} \\\; | \\\; x \geq 5 \\}$,
-  and every reachable state is contained in this set.
-* The property $even(x) \equiv x \\; \textrm{mod} \\; 2 = 0$ on the natural numbers is the set $\\{ 0, 2, 4, 6, ... \\} \subseteq \mathbb{N}$.
-  But $even$ is *not* an invariant of our example transition system,
-  as there are reachable states (e.g., 7) that do not satisfy it;
-  more formally, $7 \in R$ but $7 \not\in I$.
-* The assertion `x != 4` is an invariant.
-  While there exists states where this property does not hold,
-  none of these states are reachable by the system.
-
-On the surface, this whole idea of invariance seems a bit silly—why not just take the set of reachable states $R$
-as the only important invariant of the system?
-The trick is that $R$ is often very difficult to characterize precisely.
-Instead, we can write down a simpler invariant that includes some unreachable states,
-but suffices to prove whatever property we care about.
-(This is similar to the "strengthening the inductive hypothesis" idea we've seen before).
-
-### Proving invariants by induction
-
-How to we *prove* that a property is an invariant of a transition system?
-As is often the case in PL, we'll do it by induction.
-In particular, the trick is to induct over *paths* through the program.
-Let's try it out first,
-and then below we'll see why it works
-and how to relate it to the formalization of induction we developed early in the semester.
-
-**Theorem**: `x >= 5` is an invariant of the example system above.
-
-**Proof**: By induction on $\rightarrow$. There are two cases:
-
-* Base case: in the initial state $s_0$, `x = 5 >= 5`, so the invariant holds
-* Inductive case: Suppose the invariant holds in state $s$. Then we need to prove that it holds for every
-  state $s'$ such that $s \rightarrow s'$. By the definition of $\rightarrow$, there is only one such
-  state for this system: $s \rightarrow s + 1$. But we know by the inductive hypothesis that $s \geq 5$, and so it must be
-  that $s + 1 \geq 5$ too. Therefore the invariant holds for all states that $s$ can step to.
-
-What we did here was induct over paths through the program,
-or equivalently, induct over the set of reachable states.
-The base case just required us to show that the property holds in every initial state.
-The inductive hypothesis asked us to consider a state $s$ in which the property holds,
-and show that every state we can *step* to from $s$ maintains the property.
-Then, by induction,
-the invariant holds in every reachable state,
-as our proof has covered the initial state $s_0$
-and every state $s'$ such that $s_0 \rightarrow^* s'$.
-
-But there is a big catch to this approach!
-Let's try do the same proof again for the property `x != 4`,
-which is obviously an invariant of our program.
-
-**Theorem**: `x != 4` is an invariant of the example system above.
-
-**Proof attempt**: By induction on $\rightarrow$. There are two cases:
-
-* Base case: in the initial state $s_0$, `x = 5 != 4`, so the invariant holds
-* Inductive case: Suppose the invariant holds in state $s$. Then we need to prove that it holds for every
-  state $s'$ such that $s \rightarrow s'$. By the definition of $\rightarrow$, there is only one such
-  state for this system: $s \rightarrow s + 1$. By the inductive hypothesis, we know that $s \neq 4$.
-  But we're stuck now—we can't prove that $s + 1 \neq 4$ with this inductive hypothesis.
-  Indeed, $s = 3$ is a counterexample.
-
-What gives? This invariant is obviously true,
-but we cannot prove it by induction because *the inductive hypothesis is too weak*.
-We call an invariant an **inductive invariant** if it can be proven by induction like this.
-But **not all invariants are inductive**!
-
-This is the same idea we've seen before about needing to strengthen the inductive hypothesis.
-Here we need to strengthen the *invariant* into one that is an *inductive invariant*,
-and then use that stronger invariant to prove the actual invariant we wanted.
-
-Strengthening invariants is a skill; it's not mechanical, and while there has been some really exciting
-recent work to automatically determine inductive invariants of a program, it's a difficult problem in general.
-In this example, we're in luck, because we already proved an invariant `x >= 5`,
-and that's strong enough to prove that `x != 4` is an invariant too,
-because $x \geq 5 \Rightarrow x \neq 4$.
-But in general, this is the hard part of doing PL proofs: coming up with an invariant
-that is (a) strong enough to prove the thing we actually wanted, and yet
-(b) is an *inductive* invariant.
-
-### A more interesting example system
-
-Here's another program that is a bit more complicated:
-```
-n = input()
-x = 0
-y = n
-while y > 0:
-    x = x + 1
-    y = y - 1
-assert x == n
-```
-where here `n` is some arbitrary input provided by the user.
-
-Let's first translate this program into a transition system. 
-Again, we'll take each iteration of the loop to be a single step of the program.
-This time, let's broaden our horizons a little and model *integers* rather than just natural numbers.
-Our system looks like this:
-* The set of states is $S = \mathbb{Z} \times \mathbb{Z}$, where we'll use the first element of the pair for `x` and the second for `y`.
-* The initial states are $S_0 = \\{ (0, n) \\\; | \\\; n \in \mathbb{Z} \\}$, since `n` is provided by the user, there are many possible initial states.
-* The transition relation $\rightarrow$ is the set $\\{  ((x, y), (x + 1, y - 1)) \\\; | \\\; x, y \in \mathbb{Z} \\}$.
-
-We'd like to prove that at the end of the program,
-the assertion holds.
-Be careful here: `x == n` is certainly not an invariant of this program!
-We only want to check this property at the *end* of the loop.
-One way to say this is to state a weaker property $y = 0 \Rightarrow x = n$.
-If we can prove this property is an invariant of the system,
-we will know that our assertion holds,
-as it tells us what must be true *at the end of the loop*.
-
-We can try to prove this is an inductive invariant,
-but skipping ahead to the inductive case,
-we will find a counterexample:
-if $n = 2$, the state $(0,1)$ is in $S$,
-and $(0,1) \rightarrow (1,0)$,
-but $(1, 0)$ does not satisfy the property.
-
-Again, this doesn't mean the property is not an invariant,
-just that it's not an *inductive invariant*.
-We will need to proceed by strengthening our invariant.
-We're looking for an invariant that does two things:
-(1) is inductive, and (2) can be used to prove the original invariant.
-Again, strengthening invariants is a *skill* that needs practice and experimentation;
-there's not really a mechanical way to look at this problem and crank out the invariant we need.
-
-I happen to know that the invariant we're looking for is `n = x + y`.
-This is certainly enough to prove our original invariant: if $n = x + y$ and $y = 0$, then it must be that $x = n$.
-But can we prove it's an inductive invariant? Yes!
-
-**Theorem**: `n = x + y` is an invariant of the system above.
-
-**Proof**: By induction on $\rightarrow$. There are two cases:
-
-* Base case: let $s = (0, n) \in S_0$ be an initial state. Then $x + y = 0 + n = n$, so the invariant holds.
-* Inductive case: Suppose the invariant holds in state $s = (x, y)$, so we know that $x + y = n$.
-  Then we need to prove that it holds for every
-  state $s'$ such that $s \rightarrow s'$. By the definition of $\rightarrow$, there is only one such
-  state for this system: $(x, y) \rightarrow (x + 1, y - 1)$. 
-  But $(x + 1) + (y - 1) = x + y$, and by the inductive hypothesis we know that $x + y = n$,
-  so we therefore know that the invariant holds for $s'$ if it holds for $s$.
-
-Now we're done: we know that $n = x + y$ is an invariant,
-and that implies that $y = 0 \Rightarrow x = n$ is an invariant,
-and that in turn implies that when we exit the loop in the program,
-the assertion holds!
-
-## Inductively Defined Propositions
-
-Let's wrap up by putting this "induction over $\rightarrow$" principle onto some more solid footing.
-In [Week 01](@/notes/week01/_index.md) we talked about inductive sets,
-and saw how we can use induction over inductive sets to prove a property for every member of the set.
-
-It turns out that the induction principle we were using above is just an instance of this same pattern.
-In particular, what we were doing was inducting over the *proposition* $\rightarrow^* $.
-To see what that means, let's write down a definition of $\rightarrow^*$ as two inference rules,
-similar to what we did for inductive sets in Lecture 1:
-
+For our `expr` language, such a function might look like this:
 $$
-\frac{}{s \rightarrow^* s} \textrm{ (base case)}
+D(e) = \begin{cases}
+    n        & e = \texttt{Const } n \\\\
+    D(e_1) + D(e_2) & e = \texttt{Plus } e_1\ e_2 \\\\
+    D(e_1) \times D(e_2) & e = \texttt{Times } e_1\ e_2 \\\\
+\end{cases}
+$$
+As with every other function we've defined over an ADT, we define a case for each constructor.
+The function recurses to evaluate sub-expressions, and then applies the mathematical $+$ and $\times$ operations when necessary.
+
+A semantics like this one is often called an **interpreter**—it takes as input a program
+and *interprets* it to evaluate its meaning. Interpreters are really handy for a bunch of reasons,
+and are especially well suited to implementation in functional programming languages,
+as we'll see in the next couple of lectures.
+
+A note on notation: denotational semantics are very common in programming languages,
+so common that we have a short-hand notation for them using $\[\\![ \cdot ]\\!]$ brackets, like this:
+$$
+\begin{align}
+\[\\![ \texttt{Const } n ]\\!] &= n \\\\
+\[\\![ \texttt{Plus } e_1\ e_2 ]\\!] &= \[\\![ e_1 ]\\!] + \[\\![ e_2 ]\\!] \\\\
+\[\\![ \texttt{Times } e_1\ e_2 ]\\!] &= \[\\![ e_1 ]\\!] \times \[\\![ e_2 ]\\!]
+\end{align}
 $$
 
+Now we can see that our two programs above, while not syntactically equal, do *evaluate* to the same thing:
 $$
-\frac{s_1 \rightarrow s_2 \quad\quad s_2 \rightarrow^* s_3}{s_1 \rightarrow^* s_3} \textrm{ (inductive case)}
+\begin{align}
+\[\\![ \texttt{Plus (Const 1) (Const 2)} ]\\!] &= \[\\![ \texttt{Const 1} ]\\!] + \[\\![ \texttt{Const 1} ]\\!] \\\\
+&= 1 + 1 \\\\
+&= 2 \\\\
+\[\\![ \texttt{Const 2} ]\\!] &= 2
+\end{align}
 $$
 
-In words, what we're saying here is:
-1. $s$ can always reach itself (the base case).
-2. If $s_1$ can take one step to $s_2$ and then $s_2$ can reach $s_3$, then $s_1$ can reach $s_3$ as well.
+## Proofs with denotational semantics
 
-What we've done here is define an *inductive proposition*.
-A *proposition* is a statement that can be true or false;
-here, the statement is "$s_1$ can reach $s_2$".
-We're saying that there are two ways this proposition can be true:
-either the trivial case $s_1 = s_2$,
-or the inductive case where we can "add one more step" to an existing reachability proposition.
+Now that we know how to assign programs meaning via a denotational semantics,
+we can do proofs *about* programs, rather than the proofs about program syntax we saw last time.
+Let's try a simple one: we know that addition and multiplication are commutative,
+so we should be able to flip the arguments to `Plus` and `Times` operations without changing how the program evaluates.
 
-Now our induction principle should be a little more clear.
-To do induction over an inductive proposition,
-we first prove every base case proposition.
-Then in the inductive case,
-we get to assume that the proposition holds for some path,
-and need to prove that it holds for every way that we can "add one more step".
-
-This formulation of induction over transition systems is very powerful.
-In particular, unlike when we were inducting over program syntax with denotational semantics,
-induction over transition systems lets us prove properties of non-terminating programs.
-It also makes it much simpler to prove properties even about terminating programs that involve loops
-or other repetitive structures that are difficult to define denotationally.
-Also, inductive propositions are a great fit for proving in Coq,
-which "only knows inductive types"—we'll be able to encode inductive propositions as inductive types
-just like we've done before with inductive sets.
-
-## When manual transition systems get difficult
-
-So far we've been defining our transition systems by hand for each program.
-It hasn't been all that hard—we just declare all the variables, taken together,
-to be the state. But that approach isn't always going to work. Here's an example:
-
+Here's a function that implements our "flip" operation:
 ```
-x = 0
-while x < 5:
-    x = x + 1
-while x > 0:
-    x = x - 1
+flip (Const n) = Const n
+flip (Plus e1 e2) = Plus (flip e2) (flip e1)
+flip (Times e1 e2) = Times (flip e2) (flip e1)
 ```
 
-We could try to define a transition system for this program
-where the set of states is just $\mathbb{N}$, reflecting the possible values of `x`.
-But we'd be in trouble when trying to define the transition relation:
-the first loop suggests a relation of $x \rightarrow x + 1$,
-while the second suggests $x \rightarrow x - 1$.
-This system allows executions that we know aren't possible, like this one:
+We can use the denoational semantics to state and prove our theorem that `flip` doesn't affect evaluation:
+
+**Theorem**: for all expressions `e`, $\[\\![ e ]\\!] = \[\\![ \texttt{flip}\ e ]\\!]$.
+
+**Proof**: by induction on `e`. There are three cases:
+1. (Base case for `Const`) By definition of `flip`, $\[\\![ \texttt{flip}\ (\texttt{Const}\ n) ]\\!] = \[\\![ \texttt{Const}\ n ]\\!]$.
+2. (Inductive case for `Plus`) Suppose that $\[\\![ e_1 ]\\!] = \[\\![ \texttt{flip}\ e_1 ]\\!]$ and likewise for $e_2$. We need to show
+that $\[\\![ \texttt{Plus}\ e_1\ e_2 ]\\!] = \[\\![ \texttt{flip}\ (\texttt{Plus}\ e_1\ e_2) ]\\!]$. Let's start by manipulating the RHS:
+$$
+\begin{align}
+RHS = \[\\![ \texttt{flip}\ (\texttt{Plus}\ e_1\ e_2) ]\\!] &= \[\\![ \texttt{Plus}\ (\texttt{flip}\ e_2)\ (\texttt{flip}\ e_1) ]\\!] \\\\
+&= \[\\![ \texttt{flip}\ e_2 ]\\!] + \[\\![ \texttt{flip}\ e_1 ]\\!] \\\\
+&= \[\\![ e_2 ]\\!] + \[\\![ e_1 ]\\!] \\\\
+&= \[\\![ e_1 ]\\!] + \[\\![ e_2 ]\\!] \\\\
+&= LHS
+\end{align}
+$$
+where the first line is by the definition of `flip`,
+the second and fifth lines are by the definition of $\[\\![ \texttt{Plus}\ e_1\ e_2 ]\\!]$,
+the third line is by the inductive hypotheses,
+and the fourth line is by commutativity of $+$.
+3. (Inductive case for `Times`) This case is identical to the `Plus` case.
+
+This is our first real proof about *programs* and what they *mean*.
+Notice how all the tools we've seen so far this semester came together here:
+* We used ADTs to define program syntax, so that we didn't have to reason about programs as strings like compilers do
+* We used proof by induction to prove a property for *every* program, not just a few programs
+* Denotational semantics gave us a mathematical way to define the behavior of our langauge that was amenable to proofs
+
+## Interpreters with state
+
+Let's look at a very different programming language now:
+a *stack machine* whose instructions manipulate a stack.
+This one will require two ADTs, one for instructions and one for programs:
 ```
-x = 0, x = 1, x = 2, x = 1
+instr := Push nat
+       | Add
+       | Multiply
+
+prog := nil 
+      | cons instr prog
+```
+Notice that the `prog` ADT is just a list of instructions, the same as the list ADT we studied in [Week 02](@/notes/week02/_index.md).
+
+To get a feel for how this machine works,
+let's write a program `p` that adds 1 and 2 together.
+We'll use list syntax to make our lives a little easier here:
+```
+p = [Push 1, Push 2, Add]
+```
+The two push instructions push constants onto a stack.
+The add instruction pops the top two values off the stack,
+adds them together, and pushes the result back onto the stack.
+So, at the end of this program,
+we should have a stack with just one value `3` on it.
+
+To make this definition formal, let's write a denotational semantics, first for our `instr` ADT:
+$$
+\begin{align}
+\[\\![ \texttt{Push } n ]\\!]\(s) &= \texttt{cons}\ n\ s \\\\
+\[\\![ \texttt{Add} ]\\!]\(\texttt{cons}\ n_1\ \texttt{(cons}\ n_2\ s\texttt{)}) &= \texttt{cons}\ (n_1 + n_2)\ s \\\\
+\[\\![ \texttt{Multiply} ]\\!]\(\texttt{cons}\ n_1\ \texttt{(cons}\ n_2\ s\texttt{)}) &= \texttt{cons}\ (n_1 \times n_2)\ s \\\\
+\end{align}
+$$
+
+Here each denotation is itself a *function* that transforms a stack—it takes one stack as input and returns a stack reflecting the effect of the instruction.
+We are using a list ADT to model stacks.
+The `Push` semantics just pushes onto the stack using `cons`.
+The `Add` and `Multiply` semantics take the top two elements from the stack,
+add or multiply them together,
+and push the result back onto the stack.
+
+Notice that we only defined `Add` and `Multiply` for stacks that have at least two elements on them.
+For this discussion it won't matter what we do with cases where this isn't true,
+but there are several reasonable choices.
+
+Now we can define the denotational semantics for entire programs:
+$$
+\begin{align}
+\[\\![ \texttt{cons}\ i\ p ]\\!]\(s) &= \[\\![ p ]\\!]\(\[\\![ i ]\\!]\(s)) \\\\
+\[\\![ \texttt{nil} ]\\!]\(s) &= s
+\end{align}
+$$
+What we're doing here is taking the *composition* of each instruction's effect on the stack.
+For example, to run the program `p` above, we can start from the empty stack, like this:
+$$
+\begin{align}
+\[\\![ [\texttt{Push}\ 1, \texttt{Push}\ 2, \texttt{Add}] ]\\!]\([]) &= \[\\![ [\texttt{Push}\ 2, \texttt{Add}] ]\\!]\(\[\\![ \texttt{Push}\ 1 ]\\!]\([])) \\\\
+&= \[\\![ [\texttt{Push}\ 2, \texttt{Add}] ]\\!]\([1]) \\\\
+&= \[\\![ [\texttt{Add}] ]\\!]\(\[\\![ \texttt{Push}\ 2 ]\\!]\([1])) \\\\
+&= \[\\![ [\texttt{Add}] ]\\!]\([2, 1]) \\\\
+&= \[\\![ [] ]\\!]\(\[\\![ \texttt{Add} ]\\!]\([2, 1])) \\\\
+&= \[\\![ [] ]\\!]\([3]) \\\\
+&= [3]
+\end{align}
+$$
+
+## Proofs about compilers
+
+We can use the tools we've developed so far to write a simple *compiler*
+that translates arithmetic `expr`s to stack machine `prog`s.
+Even better: we can use our denotational semantics to *prove that compiler correct*!
+Compilers are incredibly important infrastructure for modern computing,
+so being able to give strong guarantess like this is a huge win,
+and verified compilers like [CompCert](https://compcert.org) are a flagship example of the success of programming languages research.
+
+As always, our compiler is just a function over an ADT,
+so we define what happens to each constructor.
+Remember that `prog` is just the list ADT,
+so the right-hand side of our `compile` function will be returning lists of `instr`s.
+```
+compile (Const n) = [Push n]
+compile (Plus e1 e2) = compile e1 ++ (compile e2 ++ [Add])
+compile (Times e1 e2) = compile e1 ++ (compile e2 ++ [Times])
+```
+where here I'm writing `++` for the `append` operation on lists.
+Try running this compiler on the expression `Plus (Const 1) (Const 2)`
+to see that it results in the same `prog` as the `p` example we saw above.
+
+What does it mean for `compile` to be correct?
+Intuitively, we'd like it to preserve the semantics of the program it compiles.
+Using our denotational semantics,
+we can formalize that intuition a little:
+the original and compiled programs should denote to the same value.
+There's a minor catch: the stack language denotations start with and return *stacks*,
+whereas the expression language denotations return *values*.
+We can work around this by just declaring that the *top of the stack* is the "return value" of a stack program,
+and that our execution starts with an empty stack.
+In other words, here's our theorem:
+
+**Theorem**: for all `expr`s `e`, $\[\\!\[ \texttt{compile}\ e \]\\!\]([]) = [\ \[\\![ e ]\\!]\ ]$.
+
+**Proof**: by induction on `e`. There are three cases:
+1. (Base case for `Const`)
+$$
+\begin{align}
+\[\\![ \texttt{compile}\ (\texttt{Const}\ n) ]\\!]\([]) &= \[\\![ [\texttt{Push}\ n] ]\\!]\([]) \\\\
+&= \[\\![ [] ]\\!]\(\[\\!\[ \texttt{Push}\ n \]\\!\]([]) ) \\\\
+&= \[\\![ [] ]\\!]\( [n] ) \\\\
+&= [n] \\\\
+[\ \[\\![ \texttt{Const}\ n ]\\!]\ ] &= [n]
+\end{align}
+$$
+2. (Inductive case for `Plus`) Suppose that $\[\\!\[ \texttt{compile}\ e_1 ]\\!]([]) = [\ \[\\![ e_1 ]\\!]\ ]$
+and similar for $e_2$. We need to show that $\[\\!\[ \texttt{compile}\ (\texttt{Plus}\ e_1\ e_2) ]\\!]([]) = [\ \[\\![ \texttt{Plus}\ e_1\ e_2 ]\\!]\ ]$.
+Let's start with the left-hand side:
+$$
+\begin{align}
+LHS = \[\\![ \texttt{compile}\ (\texttt{Plus}\ e_1\ e_2) ]\\!]([]) &= \[\\![ \texttt{compile}\ e_1\ \texttt{++}\ (\texttt{compile}\ e_2\ \texttt{++}\ [\texttt{Add}]) ]\\!]([]) \\\\
+&= \[\\![ \texttt{compile}\ e_1\ \texttt{++}\ (\texttt{compile}\ e_2\ \texttt{++}\ [\texttt{Add}]) ]\\!]([]) \\\\
+\end{align}
+$$
+But here we're stuck! To make more progress here, we need to be able to apply our inductive hypothesis,
+but notice that it only talks about $\[\\![ \texttt{compile}\ e_1 ]\\!]([])$,
+whereas we need to talk about the semantics when `compile e1` has more stuff appended to it.
+If we look further ahead, we'll see another issue:
+once the program `compile e1` has executed, we'll have a non-empty stack and `compile e2` to reason about next,
+but the inductive hypothesis only talks about `compile e2` running on empty stacks.
+
+There is actually no way to make this induction work as is! To make progress, we need to **strengthen the inductive hypothesis** somehow.
+This is a very common requirement in PL proofs.
+In this case, we'll need to state and prove a stronger, more complicated lemma relating our two languages.
+It looks like this:
+
+**Lemma**: for all `expr`s `e`, `prog`s `p`, and stacks `s`, $\[\\![ \texttt{compile}\ e\ \texttt{++}\ p ]\\!](s) = \[\\![ p ]\\!](\texttt{cons}\ \[\\![ e ]\\!]\ s)$.
+
+Notice this is a generalization of our original theorem.
+In words, it says that running the compiled version of any single `expr` `e`
+on a stack `s` and then running the rest of a program `p`
+is the same as evaluating `e` and then running `p` on the stack `s` *but* with the result of the evaluation on top.
+
+**Proof**: by induction on `e`. There are three cases:
+1. (Base case for `Const`) Let `p` and `s` be arbitrary. Then:
+$$
+\begin{align}
+\[\\![ (\texttt{compile}\ (\texttt{Const}\ n))\ \texttt{++}\ p ]\\!](s) &= \[\\![ [\texttt{Push}\ n]\ \texttt{++}\ p ]\\!](s) \\\\
+&= \[\\![ p ]\\!]\(\[\\!\[ \texttt{Push}\ n \]\\!\](s) ) \\\\
+&= \[\\![ p ]\\!]\( \texttt{cons}\ n\ s ) \\\\
+&= \[\\![ p ]\\!]\( \texttt{cons}\ \[\\![ \texttt{Const}\ n ]\\!]\\ s )
+\end{align}
+$$
+2. (Inductive case for `Plus`) Suppose that *for all* `p` and `s`, $\[\\![ \texttt{compile}\ e_1\ \texttt{++}\ p ]\\!](s) = \[\\![ p ]\\!](\texttt{cons}\ \[\\![ e_1 ]\\!]\ s)$,
+and similar for $e_2$. (Notice already the difference from our previous attempt: our inductive hypothesis talks about every `p` and `s` now).
+
+   We need to show that $\[\\![ \texttt{compile}\ (\texttt{Plus}\ e_1\ e_2)\ \texttt{++}\ p ]\\!](s) = \[\\![ p ]\\!](\texttt{cons}\ \[\\![ \texttt{Plus}\ e_1\ e_2 ]\\!]\ s)$.
+Let's start with the left-hand side:
+$$
+\begin{align}
+LHS &= \[\\![ \texttt{compile}\ (\texttt{Plus}\ e_1\ e_2)\ \texttt{++}\ p ]\\!](s) \\\\
+&= \[\\![ (\texttt{compile}\ e_1\ \texttt{++}\ (\texttt{compile}\ e_2\ \texttt{++}\ [\texttt{Add}]))\ \texttt{++}\ p ]\\!](s) &\textrm{by definition of}\ \texttt{compile}\\\\
+&= \[\\![ \texttt{compile}\ e_1\ \texttt{++}\ ((\texttt{compile}\ e_2\ \texttt{++}\ [\texttt{Add}])\ \texttt{++}\ p) ]\\!](s) &\texttt{++}\ \textrm{is associative}\\\\
+\end{align}
+$$
+Now we can use our inductive hypothesis for $e_1$, because it talks about *any* `p`:
+$$
+\begin{align}
+&= \[\\![ (\texttt{compile}\ e_2\ \texttt{++}\ [\texttt{Add}])\ \texttt{++}\ p ]\\!](\texttt{cons}\ \[\\![ e_1 ]\\!]\ s) &\textrm{by inductive hypothesis}\\\\
+&= \[\\![ \texttt{compile}\ e_2\ \texttt{++}\ ([\texttt{Add}]\ \texttt{++}\ p) ]\\!](\texttt{cons}\ \[\\![ e_1 ]\\!]\ s) &\texttt{++}\ \textrm{is associative}\\\\
+\end{align}
+$$
+And now we use the inductive hypothesis *again* but for $e_2$. This time it works both because it talks about any `p` and *also* about any `s`:
+$$
+\begin{align}
+&= \[\\![ [\texttt{Add}]\ \texttt{++}\ p ]\\!](\texttt{cons}\ \[\\![ e_2 ]\\!]\ (\texttt{cons}\ \[\\![ e_1 ]\\!]\ s)) &\texttt{++}\ \textrm{is associative}\\\\
+&= \[\\![ p ]\\!](\[\\![ \texttt{Add} ]\\!] (\texttt{cons}\ \[\\![ e_2 ]\\!]\ (\texttt{cons}\ \[\\![ e_1 ]\\!]\ s))) &\textrm{by semantics of}\ \texttt{prog}\\\\
+&= \[\\![ p ]\\!](\texttt{cons}\ (\[\\![ e_2 ]\\!] + \[\\![ e_1 ]\\!])\ s) &\textrm{by semantics of}\ \texttt{Add}\\\\
+&= \[\\![ p ]\\!](\texttt{cons}\ (\[\\![ e_1 ]\\!] + \[\\![ e_2 ]\\!])\ s) &\textrm{by commutativity of}\ +\\\\
+&= \[\\![ p ]\\!](\texttt{cons}\ \[\\![ \texttt{Plus}\ e_1\ e_2 ]\\!]\ s) &\textrm{by semantics of}\ \texttt{Plus}\\\\
+&= RHS
+\end{align}
+$$
+and we're done with this case!
+3. (Inductive case for `Times`) This case works the same way as for `Plus`, but using multiplication, which is also commutative.
+
+Phew! That was a long proof for a lemma. We're not done yet, though. Let's restate our original correctness theorem for `compile`, and use our new lemma to prove it:
+
+**Theorem**: for all `expr`s `e`, $\[\\![ \texttt{compile}\ e ]\\!]([]) = [\ \[\\![ e ]\\!]\ ]$.
+
+**Proof**: let `e` be an arbitrary `expr`. Then:
+$$
+\begin{align}
+LHS = \[\\![ \texttt{compile}\ e ]\\!]([]) &= \[\\![ \texttt{compile}\ e\ \texttt{++}\ [] ]\\!]([]) &\textrm{since}\ \texttt{l ++ [] = l} \\
+\end{align}
+$$
+Now we can set $p = []$ and $s = []$, and then our lemma applies, giving us:
+$$
+\begin{align}
+\[\\![ \texttt{compile}\ e\ \texttt{++}\ [] ]\\!]([]) &= \[\\![ [] ]\\!](\texttt{cons}\ \[\\![ e ]\\!]\ [])  &\textrm{by lemma} \\\\
+&= \texttt{cons}\ \[\\![ e ]\\!]\ [] &\textrm{by semantics of}\ \texttt{prog} \\\\
+&= [\ \[\\![ e ]\\!]\ ] &\textrm{syntactic sugar for lists}
+\end{align}
+$$
+and we're done!
+
+Notice that when proving our final theorem, we no longer needed to use induction—the helper lemma
+did the induction for us, and the correctness theorem "fell out" of that lemma after a little manipulation into the right form.
+This is, again, a very common pattern in PL proofs.
+We proved a *stronger* property that was inductive,
+and then specialized that property to the theorem we actually wanted to prove.
+
+## Interpreters in practice
+
+While we're studying interpreters as mathematical objects that give languages a semantics,
+they are also a common way to *implement* programming languages.
+For example, Python is implemented as an interpreter of a *bytecode* language
+not too dissimilar from our stack machine language.
+
+To see how this works, consider this small Python program:
+
+```python
+def foo(x, y):
+    if x > 10:
+        return x + y
+    else:
+        return x * y
+
+foo(2, 5)
 ```
 
-The problem here is that we need to know "which loop" we're in to know
-which transitions are possible. One way to fix that would be to add a boolean
-to the state that tracks which loop we're in.
-But in general, that's not a great solution.
-In the next lecture, we'll see a more general approach that deals with this issue.
+If we save this program as `foo.py`, we can run `python -m dis foo.py`
+to see the stack language representation of the program:
+
+```
+  1           0 LOAD_CONST               0 (<code object foo at 0x100dc5bb0, file "foo.py", line 1>)
+              2 LOAD_CONST               1 ('foo')
+              4 MAKE_FUNCTION            0
+              6 STORE_NAME               0 (foo)
+
+  7           8 LOAD_NAME                0 (foo)
+             10 LOAD_CONST               2 (2)
+             12 LOAD_CONST               3 (5)
+             14 CALL_FUNCTION            2
+             16 POP_TOP
+             18 LOAD_CONST               4 (None)
+             20 RETURN_VALUE
+
+Disassembly of <code object foo at 0x100dc5bb0, file "foo.py", line 1>:
+  2           0 LOAD_FAST                0 (x)
+              2 LOAD_CONST               1 (10)
+              4 COMPARE_OP               4 (>)
+              6 POP_JUMP_IF_FALSE        8 (to 16)
+
+  3           8 LOAD_FAST                0 (x)
+             10 LOAD_FAST                1 (y)
+             12 BINARY_ADD
+             14 RETURN_VALUE
+
+  5     >>   16 LOAD_FAST                0 (x)
+             18 LOAD_FAST                1 (y)
+             20 BINARY_MULTIPLY
+             22 RETURN_VALUE
+```
+
+The first block here creates the `foo` function as a pointer to a *code object* that is defined later in the output.
+The second block makes the function call to `foo` by pushing the two arguments onto the stack,
+calling the function,
+and popping the return value off the stack.
+
+The interesting stuff is in the `foo` code object.
+The first block implements the comparison—the `COMPARE_OP` instruction
+pushes the result of its comparison onto the stack as a boolean,
+and the `POP_JUMP_IF_FALSE` instruction pops that value and, if it's false, jumps down to instruction 16.
+The two later blocks implement the two sides of the branch.
+In each case, we push two arguments `x` and `y` onto the stack,
+and then run `BINARY_ADD` or `BINARY_MULTIPLY`,
+which pop the top two elements from the stack and push the result,
+just as the `Add` and `Multiply` instructions in our language did.
+
+Obviously, Python's interpreter is far more sophisticated than ours,
+and in particular,
+the canonical implementation assigns *C code* to each instruction
+rather than a mathematical function.
+But the idea is the same:
+an interpreter takes as input program syntax
+and *interprets* it to produce a result.
+This is the essence of a denotational semantics
+as opposed to the other types of semantics we'll study in this course.
+
+(If you're curious about how the Python interpreter works,
+I like [this chapter from the book *500 Lines or Less*](http://aosabook.org/en/500L/a-python-interpreter-written-in-python.html)
+that builds a small Python bytecode interpreter in Python).
+
+## Where interpreters break down
+
+While denotational semantics give us simple mathematical tools to reason about programs,
+they sometimes lead to complex or even impossible semantics. Let's see an example of this by trying
+to add two new features to our language: support for variables and for control flow via `while` loops.
+
+We'll do this by defining a new language for *commands*, but first we need to add variables to our expression language:
+```
+expr := Const nat
+      | Var var
+      | Plus expr expr
+      | Times expr expr
+```
+Here we're adding a base case `Var` expression that contains the variable name. For this discussion let's just say that the `var` type is `string`.
+
+To give the semantics for this language, we now need a notion of *maps* that assign each variable name
+to a value. Let's write such a map as a *function* $v(x)$ that takes a variable name $x$ as input and
+returns a value. We'll assume here that every variable name has a value (i.e., $v$ is a total function),
+but that's just to make our semantics a little easier.
+
+Now we can write the denotational semantics for `expr`s like this:
+$$
+\begin{align}
+\[\\![ \texttt{Const } n ]\\!](v) &= n \\\\
+\[\\![ \texttt{Var } x ]\\!](v) &= v(x) \\\\
+\[\\![ \texttt{Plus } e_1\ e_2 ]\\!](v) &= \[\\![ e_1 ]\\!](v) + \[\\![ e_2 ]\\!](v) \\\\
+\[\\![ \texttt{Times } e_1\ e_2 ]\\!](v) &= \[\\![ e_1 ]\\!](v) \times \[\\![ e_2 ]\\!](v)
+\end{align}
+$$
+
+Here the semantics takes as input the variable map, just like our stack language semantics took stacks as input.
+This seems a bit tedious right now, as the map is always the same, but it will change when we add assignment to the language in a moment.
+
+Now let's define a command language with this syntax:
+```
+cmd := skip
+     | var <- expr
+     | cmd; cmd
+     | while expr do cmd done
+```
+This is language of *statements* rather than expressions.
+A command can either be a `skip`, which means "do nothing",
+an assignment of an expression to a variable,
+the sequence of two commands `cmd; cmd`,
+or a while loop that runs a `cmd` until an expression returns 0.
+
+Let's try to write down some semantics for this command language.
+The semantics will be a transformer over *variable maps*;
+that is, it will both take as input and return variable maps.
+The first three cases of `cmd` are easy enough:
+$$
+\begin{align}
+\[\\![ \texttt{skip} ]\\!](v) &= v \\\\
+\[\\![ x \texttt{ <- } e ]\\!](v) &= v\[x \mapsto \[\\![ e ]\\!](v)] \\\\
+\[\\![ c_1 \texttt{; } c_2 ]\\!](v) &= \[\\![ c_2 ]\\!](\[\\![ c_1 ]\\!](v))
+\end{align}
+$$
+
+Here, we're writing $v\[x \mapsto a]$ to mean the _map update_ operation on $v$—returning a map
+where $x$ is mapped to value $a$ and otherwise returns the same value as $v$ would.
+
+Loops are the tricky case. The semantics we want is that the loop keeps running until the expression
+returns 0 (since we don't have booleans in our language). We can try to write that down like this:
+$$
+\begin{align}
+\[\\![ \texttt{while } e \texttt{ do } c \texttt{ done} ]\\!](v) &= \begin{cases}
+v & \textrm{if } \[\\![ e ]\\!](v) = 0 \\\\
+\[\\![ \texttt{while } e \texttt{ do } c \texttt{ done} ]\\!](\[\\![ c ]\\!](v)) & \textrm{otherwise}
+\end{cases}
+\end{align}
+$$
+But now we have a problem—this isn't really a "definition", since it expresses the semantics of the
+while loop *in terms of itself*. This is actually a recursive equation, and we know from math that
+recursive equations don't always have a solution!
+
+The core of the problem here is *termination*, and it's a fairly fundamental issue for denotational
+semantics. It's not impossible to solve; the idea is to define the semantics of `while` as a *fixed point*
+of the recursive equation, and then prove (via the [Kleene fixed-point theorem](https://en.wikipedia.org/wiki/Kleene_fixed-point_theorem))
+that this fixed point exists for the `cmd` language. But this is incredibly tedious and makes our
+semantics very difficult to use. It's especially tedious in Coq, which requires all functions to terminate.
+So we aren't going to look at it any further.
+
+The takeaway here is that, while denotational semantics are great,
+they have downsides, especially when dealing with non-terminating programs
+(and also with non-deterministic programs, which we won't look at much here).
+To deal with these sorts of programs,
+we will turn instead to *operational semantics* in the next few lectures.
 

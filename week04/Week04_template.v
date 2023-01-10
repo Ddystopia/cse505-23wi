@@ -1,65 +1,37 @@
-(* include libraries and notations *)
-Require Import Arith Lia List String.
-Import ListNotations.
-Open Scope string.
+Require Import Lia.
 
+(* enable type inference *)
 Set Implicit Arguments.
 
-Definition eq_dec (A : Type) :=
-  forall (x : A),
-    forall (y : A),
-      {x = y} + {x <> y}.
-
-Notation var := string.
-Definition var_eq : eq_dec var := string_dec.
-
-Definition valuation := list (var * nat).
-
-Fixpoint lookup (x : var) (v : valuation) : option nat :=
-  match v with
-  | [] => None
-  | (y, n) :: v' =>
-    if var_eq x y
-    then Some n
-    else lookup x v'
-  end.
-
-Inductive arith : Set :=
-| Const (n : nat)
-| Var (x : var)
-| Plus (e1 e2 : arith)
-| Minus (e1 e2 : arith)
-| Times (e1 e2 : arith).
-
-Fixpoint eval_arith (e : arith) (v : valuation) : nat :=
-  match e with
-  | Const n => n
-  | Var x =>
-    match lookup x v with
-    | None => 0
-    | Some n => n
-    end
-  | Plus  e1 e2 => eval_arith e1 v + eval_arith e2 v
-  | Minus e1 e2 => eval_arith e1 v - eval_arith e2 v
-  | Times e1 e2 => eval_arith e1 v * eval_arith e2 v
-  end.
-
-Declare Scope arith_scope.
-Coercion Const : nat >-> arith.
-Coercion Var : var >-> arith.
-Infix "+" := Plus : arith_scope.
-Infix "-" := Minus : arith_scope.
-Infix "*" := Times : arith_scope.
-Delimit Scope arith_scope with arith.
-Bind Scope arith_scope with arith.
+Module TrSys.
 
 (*
-If you could use a refresher on any of these definitions, please check out
-the code from Week02 where they're discussed in detail:
-    https://gitlab.cs.washington.edu/cse-505-21sp/cse-505-21sp/-/blob/main/week02/Week02.v
+CREDITS: This formalization follows the development from Chlipala's
+excellent FRAP textbook: http://adam.chlipala.net/frap/
 *)
 
-(* Copied from Week03.v *)
+
+Module FirstExample.
+
+(*
+    x = 5;
+    while 1 loop
+      x = x + 1
+    done
+*)
+Definition counter_state : Type := nat.
+
+Definition counter_init (s : counter_state) : Prop :=
+  s = 5.
+
+  Definition counter_step (s1 s2 : counter_state) : Prop :=
+  s2 = S s1.
+
+(* ... now what?! *)
+
+End FirstExample.
+
+(* transitive reflexive closure of "R" *)
 Inductive trc {A} (R : A -> A -> Prop) : A -> A -> Prop :=
 | trc_refl :
     forall x,
@@ -70,9 +42,68 @@ Inductive trc {A} (R : A -> A -> Prop) : A -> A -> Prop :=
       trc R y z ->
       trc R x z.
 
+(* need to prove it's actually transitive! *)
+Lemma trc_transitive :
+  forall {A} (R : A -> A -> Prop) x y,
+    trc R x y ->   (* if   x can reach y following the trc of R *)
+    forall z,
+      trc R y z -> (* and  y can reach z following the trc of R *)
+      trc R x z.   (* then x can reach z following the trc of R *)
+Proof.
+  (* we already know everything we need for this kind of proof,
+     but remember to DO INDUCTION ON THE DERIVATION!
+     (Like we saw for le last week!)*)
+  intros A R x y Hxy.
+  induction Hxy; intros.
+  - assumption.
+  - apply trc_front with (y0 := y). (* have to use "y0" b/c "y" in scope... *)
+    + assumption.
+    + apply IHHxy. assumption.
+
+  (* this proof is easier with "eapply" and "eauto" *)
+  Restart.
+  intros A R x y Hxy.
+  induction Hxy; intros.
+  - assumption.
+  - eapply trc_front; eauto.
+
+  (* with a little sugar, it gets even shorter *)
+  Restart.
+  intros A R x y Hxy.
+  induction Hxy; auto.
+  econstructor; eauto. (* find and apply constructor for the goal's type *)
+Qed.
+
+(* a generic definition of transition systems *)
 Record trsys state :=
   { Init : state -> Prop
   ; Step : state -> state -> Prop }.
+
+(* what states can a transition system reach? *)
+Definition reachable {state} (sys : trsys state) (sN : state) : Prop :=
+  exists s0,
+    sys.(Init) s0 /\
+    trc sys.(Step) s0 sN.
+
+(* using the above defs *)
+Definition counter_state : Type := nat.
+Definition counter_init (s : counter_state) : Prop := s = 5.
+Definition counter_step (s1 s2 : counter_state) : Prop := s2 = S s1.
+
+Definition counter_sys : trsys counter_state := {|
+  Init := counter_init;
+  Step := counter_step
+|}.
+
+(* we will get stuck if we just try to prove our goal! *)
+Lemma counter_sys_ok :
+  forall s,
+    reachable counter_sys s ->
+    5 <= s.
+Proof.
+Abort.
+
+
 
 Definition is_invariant {state} (sys : trsys state) (P : state -> Prop) :=
   forall s0,
@@ -92,7 +123,7 @@ Definition closed_under_step {state} (sys : trsys state) (P : state -> Prop) :=
     forall s2,
       sys.(Step) s1 s2 ->
       P s2.
-
+    
 Lemma closed_under_step_trc :
   forall {state} (sys : trsys state) (P : state -> Prop) s0 sN,
     trc sys.(Step) s0 sN ->
@@ -118,6 +149,31 @@ Proof.
   eapply closed_under_step_trc; eauto.
 Qed.
 
+Theorem by_invariant :
+  forall {state} (sys : trsys state) (P : state -> Prop) s,
+    is_invariant sys P ->
+    reachable sys s ->
+    P s.
+Proof.
+  unfold is_invariant.
+  intros state sys P s Hinv Hreach.
+  destruct Hreach as [s0 [Hinit Htrc]].
+  eapply Hinv; eauto.
+Qed.
+
+Lemma reachable_transitive :
+  forall {state} (sys : trsys state) s1 s2,
+    reachable sys s1 ->
+    trc sys.(Step) s1 s2 ->
+    reachable sys s2.
+Proof.
+  unfold reachable.
+  intros state sys s1 s2 [s0 [Hinit Htrc01]] Htrc12.
+  exists s0.
+  split; auto.
+  eapply trc_transitive; eauto.
+Qed.
+
 Lemma invariant_implies :
   forall {state} (sys : trsys state) (P Q : state -> Prop),
     is_invariant sys P ->
@@ -125,15 +181,470 @@ Lemma invariant_implies :
     is_invariant sys Q.
 Proof.
   unfold is_invariant.
+  intros state sys P Q HP Himp s0 Hinit sN Htrc.
+  apply Himp.
+  apply HP with (s0 := s0).
+  - apply Hinit.
+  - apply Htrc.
+  Restart.
+
+  (* Or more quickly: *)
+  unfold is_invariant.
   eauto.
 Qed.
 
+Lemma invariant_and :
+  forall {state} (sys : trsys state) (P Q : state -> Prop),
+    is_invariant sys P ->
+    is_invariant sys Q ->
+    is_invariant sys (fun s => P s /\ Q s).
+Proof.
+  unfold is_invariant.
+  eauto.
+Qed.
+
+(* Now we can finally prove our counter system! *)
+Definition counter_ge_5 (s : counter_state) : Prop :=
+  s >= 5.
+
+Theorem counter_ge_5_invariant :
+  is_invariant counter_sys counter_ge_5.
+Proof.
+  apply invariant_induction.
+  - unfold initially_holds. simpl.
+    unfold counter_init, counter_ge_5.
+    intros s.
+    lia.
+  - unfold closed_under_step. simpl.
+    unfold counter_step, counter_ge_5.
+    intros s1 IH s2 Hstep.
+    lia.
+Qed.
+
+(* But often need to strengthen... *)
+Definition counter_ne_4 (s : counter_state) : Prop :=
+  s <> 4.
+
+Theorem counter_ne_4_invariant :
+  is_invariant counter_sys counter_ne_4.
+Proof.
+  apply invariant_induction.
+  - (* base case is no problem *)
+    unfold initially_holds. simpl.
+    unfold counter_init, counter_ne_4.
+    intros s.
+    lia.
+  - (* but the inductive case gets wedged :\ *)
+    unfold closed_under_step. simpl.
+    unfold counter_step, counter_ne_4.
+    intros s1 IH s2 Hstep.
+    Fail lia. (* oh no! *)
+    (* Our induction hypothesis is useless!
+       It only tells us that s1 is not 4,
+       but what if s1 is 3?? *)
+
+  (* let's try again *)
+  Restart.
+
+  (* Our property is not inductive.
+  
+     To see why consider this "counter example to induction" (CTI):
+        The state 3 satisfies our target invariant "counter_ne_4", AND
+        the state 3 steps to the state 4, BUT
+        the state 4 does NOT satisfy our target invariant!
+
+     Instead of trying to prove "counter_ne_4" directly by induction,
+     we need to use a *stronger* invariant that will always 'imply itself'
+     after every step!
+     
+     ... like counter_ge_5 above ;)
+   *)
+  apply invariant_implies with (P := counter_ge_5).
+  - apply counter_ge_5_invariant.
+  - unfold counter_ge_5, counter_ne_4.
+    intros.
+    lia.
+Qed.
+
+(*
+    x = 0;
+    y = input;
+    while y loop
+      x = x + 1;
+      y = y - 1
+    done
+*)
+Definition two_counters_state : Type := nat * nat.
+
+Definition two_counters_init (input : nat) (s : two_counters_state) : Prop :=
+  s = (0, input).
+
+Inductive two_counters_step :
+    two_counters_state -> two_counters_state -> Prop :=
+| two_counters_step_step :
+    forall x y,
+      two_counters_step (x, S y) (S x, y).
+
+Definition two_counters_sys (input : nat) : trsys two_counters_state := {|
+  Init := two_counters_init input;
+  Step := two_counters_step
+|}.
+
+(* this program terminates! *)
+Definition two_counters_final (s : two_counters_state) : Prop :=
+  snd s = 0.
+
+(* a specification *)
+Definition two_counters_safe (input : nat) (s : two_counters_state) : Prop :=
+  two_counters_final s ->
+  fst s = input.
+
+(* ... which is not inductive! *)
+Theorem two_counters_safe_invariant :
+  forall input,
+    is_invariant (two_counters_sys input) (two_counters_safe input).
+Proof.
+Abort.
+
+(* step back and strengthen! *)
+Definition two_counters_inv (input : nat) (s : two_counters_state) : Prop :=
+  let (x, y) := s in
+  x + y = input.
+
+Lemma two_counters_inv_invariant :
+  forall input,
+    is_invariant (two_counters_sys input) (two_counters_inv input).
+Proof.
+  intros input.
+  apply invariant_induction.
+  - unfold initially_holds. simpl.
+    unfold two_counters_init, two_counters_inv.
+    intros s H.
+    subst s.
+    reflexivity.
+  - unfold closed_under_step. simpl.
+    unfold two_counters_inv.
+    intros [x1 y1] IH [x2 y2] Hstep.
+    inversion Hstep; subst.
+    lia.
+Qed.
+
+(* no sweat with the stronger invariant! *)
+Theorem two_counters_safe_invariant :
+  forall input,
+    is_invariant (two_counters_sys input) (two_counters_safe input).
+Proof.
+  intros input.
+  apply invariant_implies with (P := two_counters_inv input).
+  - apply two_counters_inv_invariant.
+  - unfold two_counters_inv, two_counters_safe, two_counters_final.
+    intros [x y] Hinv Hfinal.
+    simpl in *.
+    lia.
+Qed.
+
+(*
+
+The recipe is always the same:
+
+(A) Given a program, define a transition system for it by answering
+    the 3 questions:
+      (1) What are the states?
+      (2) What are the initial states?
+      (3) What is the transition relation?
+
+(B) Figure out what you want to prove about all the reachable states
+    of the system.
+
+(C) The property from (B) is usually not inductive, so figure out a
+    *stronger* property that IS inductive an prove that using
+    "invariant_induction".
+
+(D) Come back and finish the proof for (B) using "invariant_implies".
+*)
+
+(* Factorial
+
+    n = input;
+    acc = 1;
+    while n loop
+      acc = acc * n;
+      n = n - 1
+    done
+*)
+
+(* pairs representing the values of "(n, acc)" *)
+Definition fact_state : Type := nat * nat.
+
+(* again parameterized over the input to the system *)
+Definition fact_init (input : nat) (s : fact_state) :=
+  s = (input, 1).
+
+(* the program is 'done' when "n" reaches 0 *)
+Definition fact_final (s : fact_state) : Prop :=
+  fst s = 0.
+
+(* each time through the loop, multiply "acc" by "n" then decrement "n" *)
+Inductive fact_step : fact_state -> fact_state -> Prop :=
+| fact_step_step : forall n acc,
+  fact_step (S n, acc) (n, acc * S n).
+
+Definition fact_sys (input : nat) : trsys fact_state := {|
+  Init := fact_init input;
+  Step := fact_step
+|}.
+
+(* Our specification is showing that the transition system,
+   once it terminates, will have computed the same thing as
+   another 'math only' version of factorial in pure Coq. *)
+Fixpoint fact (n : nat) : nat :=
+  match n with
+  | O => 1
+  | S n' => fact n' * S n'
+  end.
+
+Definition fact_safe (input : nat) (s : fact_state) : Prop :=
+  fact_final s ->
+  snd s = fact input.
+
+(* of course, the target property is not inductive... *)
+Theorem fact_safe_invariant :
+  forall input,
+    is_invariant (fact_sys input) (fact_safe input).
+Proof.
+  (* Our property only talks about final states. It won't be inductive!
+     But in case you were to give it a try, here's what would happen. *)
+  intros input.
+  apply invariant_induction.
+  - unfold initially_holds. simpl.
+    unfold fact_init, fact_safe, fact_final.
+    intros s0 Hinit Hfinal.
+    subst s0.
+    simpl in *.
+    subst input.
+    simpl.
+    reflexivity.
+  - unfold closed_under_step. simpl.
+    unfold fact_safe, fact_final.
+    intros s1 IH s2 Hstep Hfinal2.
+    inversion Hstep; subst.
+    simpl in *.
+    subst.
+    (* As expected, our induction hypothesis is useless because it only gives us
+      information when the counter is zero. *)
+Abort.
+
+(*
+We need to state an invariant that says something useful about all the states of
+the system, not just the final states.
+*)
+Definition fact_inv (input : nat) (s : fact_state) : Prop :=
+  let (n, acc) := s in
+  fact input = fact n * acc.
+
+(*
+It's all easy with the right invariant.
+*)
+Theorem fact_inv_invariant : forall input,
+  is_invariant (fact_sys input) (fact_inv input).
+Proof.
+  intros input.
+  apply invariant_induction.
+  - unfold initially_holds. simpl.
+    unfold fact_init, fact_inv.
+    intros s Hinit.
+    subst.
+    lia.
+  - unfold closed_under_step. simpl.
+    unfold fact_inv.
+    intros [n1 acc1] IH [n2 acc2] Hstep.
+    inversion Hstep; subst.
+    simpl in *.
+    lia.
+Qed.
+
+(*
+And now we can prove the target property with "invariant_implies".
+*)
+Theorem fact_safe_invariant :
+  forall input,
+    is_invariant (fact_sys input) (fact_safe input).
+Proof.
+  intros input.
+  apply invariant_implies with (P := fact_inv input).
+  - apply fact_inv_invariant.
+  - unfold fact_inv, fact_safe, fact_final.
+    intros [n acc] Hinv Hfinal.
+    simpl in *.
+    subst.
+    simpl in *.
+    lia.
+Qed.
+
+(*
+ROBOT 🤖
+
+      x = 0;
+      y = 5;
+      while ?? loop
+        when ?? then
+          y = y + 1
+         else
+          x = x + 1;
+          y = y - 1
+      done
+      done
+
+This one is a little different -- we didn't actually specify how long it
+runs or when it decides to increment "y" or instead increment "x" and
+decrement "y". The "??" above conceptually mean 'some complex code I don't
+want to think about, so I will abstract out as a nondeterministic choice'.
+*)
+
+Require Import ZArith.
+
+(* states are pairs of *integers* representing "(x, y)" *)
+Definition robot_state : Type := Z * Z.
+
+(* our robot always starts at "(0, 5)" *)
+Definition robot_init (s : robot_state) :=
+  s = (0, 5)%Z.
+
+(* Our robot can move either down and to the right or
+   instead move up. We don't say when it choose to do
+   one or other -- it's modeled as a nondeterministic choice! *)
+Inductive robot_step : robot_state -> robot_state -> Prop :=
+| robot_step_southeast :
+  forall x y,
+    robot_step (x, y) (x + 1, y - 1)%Z
+| robot_step_north :
+  forall x y,
+    robot_step (x, y) (x, y + 1)%Z.
+
+Definition robot_sys : trsys robot_state := {|
+  Init := robot_init;
+  Step := robot_step
+|}.
+
+(* Suppose we want to make sure the robot never
+   gets too close to the origin. *)
+Definition robot_safe (s : robot_state) : Prop :=
+  let (x, y) := s in
+  (x * x + y * y > 9)%Z.
+
+(* But of course our target propery is not inductive... *)
+Theorem robot_safe_invariant :
+  is_invariant robot_sys robot_safe.
+Proof.
+  (* We know this is not inductive. But here's what would happen if you try. *)
+  apply invariant_induction.
+  - unfold initially_holds. simpl.
+    unfold robot_init, robot_safe.
+    intros [x y] Hinit.
+    inversion Hinit; subst.
+    lia.
+  (* halfway there! :P *)
+  - unfold closed_under_step. simpl.
+    unfold robot_safe.
+    intros [x1 y1] IH [x2 y2] Hstep.
+    inversion Hstep; subst. (* two possible steps, so we get two subgoals *)
+    + (* case southeast *)
+      Fail lia.
+      Fail nia.
+      (* In fact, this is just not true. For example, x1 = -2, y1 = 3 is a
+         counterexample. *)
+      admit.
+    + (* case north *)
+      Fail lia.
+      Fail nia.
+      (* This one is also false. For example, x1 = 1, y1 = -3. *)
+Abort.
+
+(* so we find a stronger invariant *)
+Definition robot_inv (s : robot_state) : Prop :=
+  let (x, y) := s in
+  (x + y >= 5)%Z.
+
+(* which is easy to prove by "invariant_induction" *)
+Lemma robot_inv_invariant :
+  is_invariant robot_sys robot_inv.
+Proof.
+  apply invariant_induction.
+  - unfold initially_holds. simpl.
+    unfold robot_init, robot_inv.
+    intros [x y] Hinit.
+    inversion Hinit; subst.
+    lia.
+  - unfold closed_under_step. simpl.
+    unfold robot_inv.
+    intros [x1 y1] IH [x2 y2] Hstep.
+    inversion Hstep; subst. (* two possible steps, so we get two subgoals *)
+    + (* case southeast *)
+      lia.
+    + (* case north *)
+      lia.
+Qed.
+
+(* and we show that this stronger property implies the target proptery of
+   always avoiding the area 'too close to the origin': *)
+Theorem robot_safe_invariant :
+  is_invariant robot_sys robot_safe.
+Proof.
+  apply invariant_implies with (P := robot_inv).
+  - apply robot_inv_invariant.
+  - unfold robot_inv, robot_safe.
+    intros [x y] Hinv.
+    Fail lia.
+    Fail nia.
+    cut (x * x + (5 - x) * (5 - x) > 9)%Z; [nia|].
+    clear y Hinv.
+    Fail nia.
+    replace (x * x + (5 - x) * (5 - x))%Z
+    with (2 * x * x - 10 * x + 25)%Z by lia.
+    Fail nia.
+    assert (x >= 3 \/ x <= 2)%Z by lia. (* :O *)
+    nia. (* :O :O :O *)
+    (* Why did we pick that case split? Because the quadratic polynomial
+           2 * x * x - 10 * x + 25
+       has a minimum at x = 2.5. On either side of this minimum, the polynomial
+       gets bigger as x gets farther away from 2.5. So in either case, nia is
+       (probably) able to give a lower bound for the polynomial in terms of its
+       value at 2 or 3. *)
+    (* This is completely black magic. We won't do many proofs like this.
+       But it's fun to see one :) *)
+Qed.
+
+(* ANOTHER ROBOT PROPERTY *)
+
+(* Here's another property we may want to know about our robot's 
+   reachable states: *)
+Definition robot_x_nonneg (s : robot_state) : Prop :=
+  let (x, y) := s in
+  (x >= 0)%Z.
+
+(*
+Now our goal is to develop some custom tactics to make doing these proofs
+a bit more convenient. First we'll want a tactic that can do all the
+unfolding steps for us:
+
+Given an expression P, this custom tactic tries to find the predicate at
+the "head" of P, and unfolds that. Never throws an error, just silently
+does nothing.
+*)
 Ltac unfold_predicate P :=
   match P with
   | ?head _ => unfold_predicate head
   | _ => try unfold P
   end.
 
+(*
+Next we'll want a tactic that wraps up all the normal "invariant_induction"
+'boilerplate' that we've been copy/pasting in each example:
+
+This custom tactic applies the invariant_induction lemma and sets up subgoals
+for the base case and each inductive case. While somewhat long winded, it's
+not doing anything we haven't done a couple times by hand above.
+*)
 Ltac invariant_induction_boilerplate :=
   intros;
   apply invariant_induction; [
@@ -151,961 +662,143 @@ Ltac invariant_induction_boilerplate :=
     | [ |- forall _, ?P _ -> forall _, ?Q _ _ -> _ ] =>
       unfold_predicate P;
       unfold_predicate Q;
-      intros s1 IH s2 Hstep
+      intros s1 IH s2 Hstep;
+      try inversion Hstep;
+      try subst
     end
   ].
-(* End of copied stuff *)
 
-Module Imp.
+(* this makes life much easier ;) *)
+Theorem robot_x_nonneg_invariant :
+  is_invariant robot_sys robot_x_nonneg.
+Proof.
+  (* watch this! *)
+  invariant_induction_boilerplate; lia.
+Qed.
+
 
 (*
-CREDITS: This formalization also follows the development from Chlipala's
-excellent FRAP textbook: http://adam.chlipala.net/frap/
+So far, we have been proving that all the states reachable by a transition
+system are 'safe' -- they satisfy some predicate that we are using to specify
+which states are the 'good states'.
+
+We generally call systems that avoid bad states "safe".
+
+But what if we flip this around?
+
+What if instead we wanted to characterize all the states that we would like
+for our system to be able to reach and then prove that it can reach all those
+states? We do this less often in practice, but for the robot example, it's
+not too hard:
 *)
 
-(* Syntax of Imp. *)
-Inductive cmd :=
-| Skip
-| Assign (x : var) (e : arith)
-| Sequence (c1 c2 : cmd)
-| If (e : arith) (then_ else_ : cmd) (* new this week (but nothing fundamental) *)
-| While (e : arith) (body : cmd). (* new this week (and fundamentally different!) *)
+Definition robot_reach (s : robot_state) : Prop :=
+  let (x, y) := s in
+  (x + y >= 5 /\ x >= 0)%Z.
 
-Notation "x <- e" := (Assign x e%arith) (at level 75).
-Infix ";;" := Sequence (at level 76). (* ;; instead of ; because it interferes
-                                         with record syntax *)
-Notation "'when' e 'then' then_ 'else' else_ 'done'" :=
-  (If e%arith then_ else_) (at level 75, e at level 0).
-Notation "'while' e 'loop' body 'done'" :=
-  (While e%arith body) (at level 75).
-
-(* Translate our long horizontal lines to an inductive definition. *)
-Inductive step : valuation * cmd -> valuation * cmd -> Prop :=
-| StepAssign :
-    forall v x e v',
-      v' = (x, eval_arith e v) :: v ->
-      step (v, Assign x e) (v', Skip)
-| StepSeqLStep :
-    forall v c1 c2 v' c1',
-      step (v, c1) (v', c1') ->
-      step (v, Sequence c1 c2) (v', Sequence c1' c2)
-| StepSeqLDone :
-    forall v c2,
-      step (v, Sequence Skip c2) (v, c2)
-| StepIfTrue :
-    forall v e then_ else_,
-      eval_arith e v <> 0 ->
-      step (v, If e then_ else_) (v, then_)
-| StepIfFalse :
-    forall v e then_ else_,
-      eval_arith e v = 0 ->
-      step (v, If e then_ else_) (v, else_)
-| StepWhileTrue :
-    forall v e body,
-      eval_arith e v <> 0 ->
-      step (v, While e body) (v, Sequence body (While e body))
-| StepWhileFalse :
-    forall v e body,
-      eval_arith e v = 0 ->
-      step (v, While e body) (v, Skip).
-
-Definition counter :=
-  "x" <- 5;;
-  while 1 loop
-    "x" <- "x" + 1
-  done.
-
-Example counter_steps_10_times :
-  exists v,
-    trc step ([], counter) (v, while 1 loop
-                                  "x" <- "x" + 1
-                               done) /\
-    lookup "x" v = Some 15.
+Theorem robot_reach_invariant :
+  is_invariant robot_sys robot_reach.
 Proof.
-Admitted.
+  eapply invariant_implies.
+  eapply invariant_and.
+  apply robot_inv_invariant.
+  apply robot_x_nonneg_invariant.
+  simpl.
+  unfold robot_inv, robot_x_nonneg, robot_reach.
+  intros [x y]; auto.
 
-(* Here's our old friend the factorial program. *)
-Definition factorial : cmd :=
-  "n" <- "input";;
-  "acc" <- 1;;
-  while "n" loop
-    "acc" <- "acc" * "n";;
-    "n" <- "n" - 1
-  done;;
-  "output" <- "acc".
-
-Example factorial_4 :
-  forall v1,
-    lookup "input" v1 = Some 4 ->
-    exists v2,
-      trc step (v1, factorial) (v2, Skip) /\
-      lookup "output" v2 = Some 24.
-Proof.
-  intros v1 H.
-  eexists.
-  split.
-  - eapply trc_front.
-    apply StepSeqLStep.
-    apply StepSeqLStep.
-    apply StepSeqLStep.
-    apply StepAssign.
-    reflexivity.
-    (* Now we are left with a Skip out front of our Seq. Get rid of it. *)
-    eapply trc_front.
-    apply StepSeqLStep.
-    apply StepSeqLStep.
-    apply StepSeqLDone.
-    (* Time for the next assignment statement... *)
-    eapply trc_front.
-    apply StepSeqLStep.
-    apply StepSeqLStep.
-    apply StepAssign.
-    reflexivity.
-    eapply trc_front.
-    apply StepSeqLStep.
-    apply StepSeqLDone.
-    (* Now we're at the top of the loop. *)
-    cbn. rewrite H.
-    eapply trc_front.
-    apply StepSeqLStep.
-    apply StepWhileTrue. (* Try to enter the loop. *)
-    cbn. lia. (* Prove that we actually do enter the loop. *)
-    (* Now execute the body of the loop. *)
-    eapply trc_front.
-    apply StepSeqLStep.
-    apply StepSeqLStep.
-    apply StepSeqLStep.
-    apply StepAssign.
-    reflexivity.
-    eapply trc_front.
-    apply StepSeqLStep.
-    apply StepSeqLStep.
-    apply StepSeqLDone.
-    eapply trc_front.
-    apply StepSeqLStep.
-    apply StepSeqLStep.
-    apply StepAssign.
-    reflexivity.
-    eapply trc_front.
-    apply StepSeqLStep.
-    apply StepSeqLDone.
-    (* We're back at the top of the loop. Time for the next iteration. *)
-    cbn.
-    eapply trc_front.
-    apply StepSeqLStep.
-    apply StepWhileTrue.
-    cbn. lia.
-    eapply trc_front.
-    apply StepSeqLStep.
-    apply StepSeqLStep.
-    apply StepSeqLStep.
-    apply StepAssign.
-    reflexivity.
-    eapply trc_front.
-    apply StepSeqLStep.
-    apply StepSeqLStep.
-    apply StepSeqLDone.
-    eapply trc_front.
-    apply StepSeqLStep.
-    apply StepSeqLStep.
-    apply StepAssign.
-    reflexivity.
-    eapply trc_front.
-    apply StepSeqLStep.
-    apply StepSeqLDone.
-    (* next iteration *)
-    cbn.
-    eapply trc_front.
-    apply StepSeqLStep.
-    apply StepWhileTrue.
-    cbn. lia.
-    eapply trc_front.
-    apply StepSeqLStep.
-    apply StepSeqLStep.
-    apply StepSeqLStep.
-    apply StepAssign.
-    reflexivity.
-    eapply trc_front.
-    apply StepSeqLStep.
-    apply StepSeqLStep.
-    apply StepSeqLDone.
-    eapply trc_front.
-    apply StepSeqLStep.
-    apply StepSeqLStep.
-    apply StepAssign.
-    reflexivity.
-    eapply trc_front.
-    apply StepSeqLStep.
-    apply StepSeqLDone.
-    (* next iteration *)
-    cbn.
-    eapply trc_front.
-    apply StepSeqLStep.
-    apply StepWhileTrue.
-    cbn. lia.
-    eapply trc_front.
-    apply StepSeqLStep.
-    apply StepSeqLStep.
-    apply StepSeqLStep.
-    apply StepAssign.
-    reflexivity.
-    eapply trc_front.
-    apply StepSeqLStep.
-    apply StepSeqLStep.
-    apply StepSeqLDone.
-    eapply trc_front.
-    apply StepSeqLStep.
-    apply StepSeqLStep.
-    apply StepAssign.
-    reflexivity.
-    eapply trc_front.
-    apply StepSeqLStep.
-    apply StepSeqLDone.
-    cbn.
-    (* Finally n is 0. Try to exit the loop. *)
-    eapply trc_front.
-    apply StepSeqLStep.
-    apply StepWhileFalse.
-    cbn. lia. (* Prove we actually do exit the loop. *)
-    (* Just a few more steps left after the loop. *)
-    eapply trc_front.
-    apply StepSeqLDone.
-    eapply trc_front.
-    apply StepAssign.
-    reflexivity.
-    cbn.
-    (* Finally, we end the proof of trc using trc_refl. If you look carefully at
-       the goal here, you can "see" the actual v2 that gets plugged in for our
-       placeholder. Yikes! *)
-    apply trc_refl.
-  - (* All that's left is to show *)
-    cbn.
-    reflexivity.
-Qed. (* Nailed it, only 130 ish tactics. Lots of copy paste! *)
-
-(* like econstructor, but avoid StepWhileTrue b/c infinite tactic loops *)
-Ltac step_easy :=
-  repeat (
-    apply StepSeqLDone ||
-    eapply StepSeqLStep ||
-    (apply StepWhileFalse; cbn; reflexivity) ||
-    (apply StepAssign; reflexivity)
-  ); cbn.
-
-
-Example factorial_4_again :
-  forall v1,
-    lookup "input" v1 = Some 4 ->
-    exists v2,
-      trc step (v1, factorial) (v2, Skip) /\
-      lookup "output" v2 = Some 24.
-Proof.
-  intros v1 H.
-  eexists.
-  split.
-  - econstructor.
-    step_easy.
-    cbn. rewrite H.
-    econstructor.
-    step_easy.
-    econstructor.
-    step_easy.
-    cbn.
-    econstructor.
-    step_easy.
-    econstructor.
-    step_easy.
-    apply StepWhileTrue.
-    cbn. lia.
-    econstructor.
-    step_easy.
-    econstructor.
-    step_easy.
-    cbn.
-    econstructor.
-    step_easy.
-    cbn.
-    econstructor.
-    step_easy.
-    econstructor.
-    step_easy.
-    apply StepWhileTrue.
-    cbn. lia.
-    econstructor.
-    step_easy.
-    econstructor.
-    step_easy.
-    cbn.
-    econstructor.
-    step_easy.
-    cbn.
-    econstructor.
-    step_easy.
-    econstructor.
-    step_easy.
-    apply StepWhileTrue.
-    cbn. lia.
-    econstructor.
-    step_easy.
-    econstructor.
-    step_easy.
-    cbn.
-    econstructor.
-    step_easy.
-    cbn.
-    econstructor.
-    step_easy.
-    econstructor.
-    step_easy.
-    apply StepWhileTrue.
-    cbn. lia.
-    econstructor.
-    step_easy.
-    econstructor.
-    step_easy.
-    cbn.
-    econstructor.
-    step_easy.
-    cbn.
-    econstructor.
-    step_easy.
-    econstructor.
-    step_easy.
-    econstructor.
-    step_easy.
-    econstructor.
-    step_easy.
-    cbn.
-    econstructor.
-  - reflexivity. (* ok that only took half as many tactics *)
   Restart.
-  (* We can do even better with more tactics. *)
-  Ltac trc_easy :=
-    eapply trc_front; [solve [step_easy]|]; cbn.
-
-  Ltac trc_enter_loop :=
-    eapply trc_front; [step_easy; apply StepWhileTrue; cbn; try lia|]; cbn.
-
-  intros v1 H.
-  eexists.
-  split.
-  - trc_easy. rewrite H.
-    repeat trc_easy. (* Executes as many assignments/skips as possible. *)
-    trc_enter_loop.
-    repeat trc_easy.
-    trc_enter_loop.
-    repeat trc_easy.
-    trc_enter_loop.
-    repeat trc_easy.
-    trc_enter_loop.
-    repeat trc_easy.
-    (* exited the loop *)
-    apply trc_refl.
-  - reflexivity.
+  invariant_induction_boilerplate; lia.
 Qed.
 
-Definition cmd_init (v : valuation) (c : cmd) (s : valuation * cmd) : Prop :=
-  s = (v, c).
-
-Definition cmd_to_trsys (v : valuation) (c : cmd) : trsys (valuation * cmd) :=
-  {| Init := cmd_init v c
-   ; Step := step
-   |}.
-
-
-Definition counter_sys : trsys (valuation * cmd) :=
-  cmd_to_trsys [] counter.
-
-Definition counter_ge_5_attempt (s : valuation * cmd) :=
-  let (v, c) := s in
-  exists x,
-    lookup "x" v = Some x /\
-    x >= 5.
-
-Theorem counter_ge_5_attempt_invariant :
-  is_invariant counter_sys counter_ge_5_attempt.
-Proof.
-  invariant_induction_boilerplate.
-  (* Uh oh, this just isn't true initially! x is not mapped to anything yet. *)
-Abort.
-
-Definition counter_ge_5 (s : valuation * cmd) :=
-  let (v, c) := s in
-  c = counter \/
-  exists x,
-    lookup "x" v = Some x /\
-    x >= 5.
-
-Theorem counter_ge_5_invariant :
-  is_invariant counter_sys counter_ge_5.
-Proof.
-  invariant_induction_boilerplate.
-  - auto.
-  - destruct s1 as [v1 c1], s2 as [v2 c2].
-    destruct IH as [IH|IH].
-    + subst.
-      inversion Hstep; subst; clear Hstep.
-      inversion H0; subst; clear H0.
-      cbn. eauto.
-    +
-Abort.
-
-Definition counter_programs (s : valuation * cmd) :=
-  let (v, c) := s in
-  c = counter \/
-  c = (Skip;;
-       while 1 loop
-         "x" <- "x" + 1
-       done) \/
-  c = (while 1 loop
-         "x" <- "x" + 1
-       done) \/
-  c = ("x" <- "x" + 1;;
-       while 1 loop
-         "x" <- "x" + 1
-       done) \/
-  c = Skip.
-
-Theorem counter_programs_invariant :
-  is_invariant counter_sys counter_programs.
-Proof.
-  invariant_induction_boilerplate.
-  - auto.
-  - destruct s1 as [v1 c1], s2 as [v2 c2].
-    intuition; subst; inversion Hstep; subst; clear Hstep; auto.
-    + inversion H0; subst; clear H0. auto.
-    + inversion H0; subst; clear H0.
-    + inversion H0; subst; clear H0. auto.
-Qed.
-
-Definition counter_valuation_x_ge_5 (v : valuation) :=
-  exists x,
-    lookup "x" v = Some x /\
-    x >= 5.
-
-Definition counter_programs_x_ge_5 (s : valuation * cmd) :=
-  let (v, c) := s in
-  c = counter \/
-  (c = (Skip;;
-        while 1 loop
-          "x" <- "x" + 1
-        done) /\ counter_valuation_x_ge_5 v) \/
-  (c = (while 1 loop
-          "x" <- "x" + 1
-        done) /\ counter_valuation_x_ge_5 v) \/
-  (c = ("x" <- "x" + 1;;
-        while 1 loop
-          "x" <- "x" + 1
-        done) /\ counter_valuation_x_ge_5 v) \/
-  (c = Skip /\ counter_valuation_x_ge_5 v).
-
-Lemma counter_programs_x_ge_5_invariant :
-  is_invariant counter_sys counter_programs_x_ge_5.
-Proof.
-  invariant_induction_boilerplate.
-  - auto.
-  - destruct s1 as [v1 c1], s2 as [v2 c2].
-    unfold counter_valuation_x_ge_5 in *.
-    intuition; subst; inversion Hstep; subst; clear Hstep; auto.
-    + inversion H0; subst; clear H0. cbn. eauto 10.
-    + inversion H0; subst; clear H0.
-    + destruct H1 as [x [Hlook Hx]]. cbn. eauto 10.
-    + destruct H1 as [x [Hlook Hx]]. cbn. eauto 10.
-    + inversion H0; subst; clear H0.
-      destruct H1 as [x [Hlook Hx]]. cbn. rewrite Hlook. right. left.
-      split; auto. eexists. split; auto. lia.
-Qed.
-
-Theorem counter_ge_5_invariant :
-  is_invariant counter_sys counter_ge_5.
-Proof.
-  apply invariant_implies with (P := counter_programs_x_ge_5).
-  - apply counter_programs_x_ge_5_invariant.
-  - unfold counter_programs_x_ge_5, counter_ge_5.
-    intros [v c] Hinv.
-    intuition.
-Qed.
-
-Definition factorial_sys (input : nat) : trsys (valuation * cmd) :=
-  cmd_to_trsys [("input", input)] factorial.
-
-Fixpoint fact (n : nat) : nat :=
-  match n with
-  | O => 1
-  | S n' => fact n' * S n'
-  end.
-
-Definition factorial_safe (input : nat) (s : valuation * cmd) : Prop :=
-  let (v, c) := s in
-  c = Skip ->
-  lookup "output" v = Some (fact input).
-
-Theorem factorial_safe_invariant :
-  forall input,
-    is_invariant (factorial_sys input) (factorial_safe input).
+Theorem robot_characterize_reachable :
+  forall s,
+    robot_reach s ->
+    reachable robot_sys s.
 Proof.
 Abort.
 
-Definition factorial_after_step_one :=
-  Skip;;
-  "acc" <- 1;;
-  while "n" loop
-    "acc" <- "acc" * "n";;
-    "n" <- "n" - 1
-  done;;
-  "output" <- "acc".
-
-Definition factorial_after_step_two :=
-  "acc" <- 1;;
-  while "n" loop
-    "acc" <- "acc" * "n";;
-    "n" <- "n" - 1
-  done;;
-  "output" <- "acc".
-
-Definition factorial_after_step_three :=
-  Skip;;
-  while "n" loop
-    "acc" <- "acc" * "n";;
-    "n" <- "n" - 1
-  done;;
-  "output" <- "acc".
-
-Definition factorial_top_of_loop :=
-  while "n" loop
-    "acc" <- "acc" * "n";;
-    "n" <- "n" - 1
-  done;;
-  "output" <- "acc".
-
-Definition factorial_body_start :=
-  "acc" <- "acc" * "n";;
-  "n" <- "n" - 1;;
-  while "n" loop
-    "acc" <- "acc" * "n";;
-    "n" <- "n" - 1
-  done;;
-  "output" <- "acc".
-
-Definition factorial_body_after_step_one :=
-  Skip;;
-  "n" <- "n" - 1;;
-  while "n" loop
-    "acc" <- "acc" * "n";;
-    "n" <- "n" - 1
-  done;;
-  "output" <- "acc".
-
-Definition factorial_body_after_step_two :=
-  "n" <- "n" - 1;;
-  while "n" loop
-    "acc" <- "acc" * "n";;
-    "n" <- "n" - 1
-  done;;
-  "output" <- "acc".
-
-Definition factorial_after_loop :=
-  Skip;;
-  "output" <- "acc".
-
-Definition factorial_last_step :=
-  "output" <- "acc".
-
-Definition factorial_loop_invariant input v :=
-  exists n acc,
-    lookup "n" v = Some n /\
-    lookup "acc" v = Some acc /\
-    fact n * acc = fact input.
-
-Definition factorial_body_invariant input v :=
-  exists n acc,
-    lookup "n" v = Some (S n) /\
-    lookup "acc" v = Some acc /\
-    fact (S n) * acc = fact input.
-
-Definition factorial_body_invariant_after_step input v :=
-  exists n acc,
-    lookup "n" v = Some (S n) /\
-    lookup "acc" v = Some acc /\
-    fact n * acc = fact input.
-
-Definition factorial_inv (input : nat) (s : valuation * cmd) : Prop :=
-  let (v, c) := s in
-  (c = factorial /\ lookup "input" v = Some input) \/
-  (c = factorial_after_step_one /\ lookup "n" v = Some input) \/
-  (c = factorial_after_step_two /\ lookup "n" v = Some input) \/
-  (c = factorial_after_step_three /\ factorial_loop_invariant input v) \/
-  (c = factorial_top_of_loop /\ factorial_loop_invariant input v) \/
-  (c = factorial_body_start /\ factorial_body_invariant input v) \/
-  (c = factorial_body_after_step_one /\ factorial_body_invariant_after_step input v) \/
-  (c = factorial_body_after_step_two /\ factorial_body_invariant_after_step input v) \/
-  (c = factorial_after_loop /\ lookup "acc" v = Some (fact input)) \/
-  (c = factorial_last_step /\ lookup "acc" v = Some (fact input)) \/
-  (c = Skip /\ lookup "output" v = Some (fact input)).
-
-Ltac invc H := inversion H; subst; clear H.
-
-Lemma factorial_inv_invariant :
-  forall input,
-    is_invariant (factorial_sys input) (factorial_inv input).
+Lemma robot_vertical_reachable :
+  forall x y1 y2,
+    reachable robot_sys (x, y1) ->
+    (y2 >= y1)%Z ->
+    reachable robot_sys (x, y2).
 Proof.
-  invariant_induction_boilerplate.
-  - auto.
-  - unfold factorial_loop_invariant, factorial_body_invariant.
-    unfold factorial_body_invariant_after_step.
-    destruct s1 as [v1 c1], s2 as [v2 c2].
-    intuition idtac; subst.
-    + invc Hstep. invc H0. invc H2. invc H0.
-      cbn [eval_arith].
-      rewrite H1.
-      auto.
-    + invc Hstep. invc H0. invc H2. invc H0. auto.
-    + invc Hstep. invc H0. invc H2.
-      right. right. right. left. split; [reflexivity|].
-      exists input, 1.
-      cbn. split; auto. split; auto. lia.
-    + destruct H1 as [n [acc [? []]]].
-      invc Hstep. invc H3. invc H4.
-      eauto 20.
-    + destruct H1 as [n [acc [? []]]].
-      invc Hstep. invc H3.
-      -- right. right. right. right. right. left. split; [reflexivity|].
-         cbn in *. rewrite H in *.
-         destruct n; [congruence|]. (* note: destruct before exists *)
-         eauto.
-      -- right. right. right. right. right. right. right. right. left. split; [reflexivity|].
-         cbn in *. rewrite H in *. subst n.
-         cbn in *. rewrite H0, <- H1. f_equal. lia.
-    + destruct H1 as [n [acc [? []]]].
-      invc Hstep. invc H3. invc H4. invc H3.
-      right. right. right. right. right. right. left. split; [reflexivity|].
-      cbn. rewrite H, H0. eexists. eexists. split; eauto. split; eauto.
-      rewrite <- H1. cbn. lia.
-    + destruct H1 as [n [acc [? []]]].
-      invc Hstep. invc H3. invc H4. invc H3.
-      eauto 15.
-    + destruct H1 as [n [acc [? []]]].
-      invc Hstep. invc H3. invc H4.
-      right. right. right. left. split; [reflexivity|].
-      cbn. rewrite H. cbn. rewrite Nat.sub_0_r. eauto.
-    + invc Hstep. invc H1. invc H0.
-      auto 20.
-    + invc Hstep.
-      right. right. right. right. right. right. right. right. right. right.
-      split; auto.
-      cbn. rewrite H1. auto.
-    + invc Hstep.
+  intros x y1 y2 Hy1 Hle.
+  apply Zlt_lower_bound_ind with (z := y1) (x := y2); [|lia].
+  intros z IH Hz.
+  apply Zle_lt_or_eq in Hz.
+  destruct Hz as [Hz|Hz].
+  - specialize (IH (z - 1)%Z).
+    eapply reachable_transitive.
+    + apply IH. lia.
+    + eapply trc_front.
+      * simpl. apply robot_step_north.
+      * replace (z - 1 + 1)%Z with z by lia.
+        apply trc_refl.
+  - subst z. assumption.
 Qed.
 
-Ltac invert_one_step :=
-  match goal with
-  | [ H : step _ _ |- _ ] => invc H
-  end.
-
-Ltac invert_steps :=
-  repeat invert_one_step.
-
-Ltac magic_select_case :=
-  repeat match goal with
-  | [ |- _ \/ _ ] => (left; split; [reflexivity|]) || right
-  | _ => try split; [reflexivity|]
-  end.
-
-Ltac break_up_hyps :=
-  repeat match goal with
-  | [ H : exists _, _ |- _ ] => destruct H
-  | [ H : _ /\ _ |- _ ] => destruct H
-  end.
-
-Ltac find_rewrites :=
-  repeat match goal with
-  | [ H : _ = _ |- _ ] => rewrite H in *
-  end.
-
-Lemma factorial_inv_invariant_again :
-  forall input,
-    is_invariant (factorial_sys input) (factorial_inv input).
-Proof.
-  invariant_induction_boilerplate.
-  - auto.
-  - destruct s1 as [v1 c1], s2 as [v2 c2].
-    fold (factorial_inv input (v2, c2)).
-    intuition; subst; invert_steps;
-    unfold factorial_inv;
-    unfold factorial_loop_invariant, factorial_body_invariant in *;
-    unfold factorial_body_invariant_after_step in *;
-    magic_select_case;
-    break_up_hyps;
-    cbn in *;
-    find_rewrites;
-    eauto 20.
-    + eexists. eexists.
-      split; eauto. split; eauto. lia.
-    + destruct x; [congruence|]. (* note: destruct before exists *)
-      eauto.
-    + subst.
-      cbn in *. rewrite <- H1. f_equal. lia.
-    + eexists. eexists. split; eauto. split; eauto.
-      rewrite <- H1. cbn. lia.
-    + eexists. eexists. split; eauto. split; eauto.
-      cbn. rewrite <- H1. f_equal. f_equal. lia.
-Qed.
-
-Theorem factorial_safe_invariant :
-  forall input,
-    is_invariant (factorial_sys input) (factorial_safe input).
-Proof.
-  intros input.
-  apply invariant_implies with (P := factorial_inv input).
-  - apply factorial_inv_invariant.
-  - unfold factorial_inv, factorial_safe.
-    intros [v c] Hinv Hfinal.
-    subst.
-    intuition; discriminate.
-Qed.
-
-Lemma decompose_sequence_execution :
-  forall v v' c1 c2 c',
-    trc step (v, c1;; c2) (v', c') ->
-    exists v1' c1',
-      trc step (v, c1) (v1', c1') /\
-      (c' = (c1';; c2) \/
-        (c1' = Skip /\ trc step (v1', c2) (v', c'))).
-Proof.
-  intros v v' c1 c2 c' Hstep.
-  induction Hstep.
-  - (* wait... what is x??? *)
-  Restart.
-  intros v v' c1 c2 c' Hstep.
-  remember (v, c1;;c2) as s.
-  remember (v', c') as s'.
-  revert v c1 c2 v' c' Heqs Heqs'.
-  induction Hstep; intros v c1 c2 v' c' ? ?; subst.
-  - invc Heqs'. eexists. eexists. split. constructor. auto.
-  - invc H.
-    + specialize (IHHstep v'0 c1' c2 v' c' eq_refl eq_refl).
-      destruct IHHstep as [v1' [c1'0 [Hstep' Hc']]].
-      eexists. eexists.
-      split. eapply trc_front; eauto.
-      intuition.
-    + eexists. eexists. split. apply trc_refl.
-      auto.
-Qed.
-
-Lemma trc_seq_l_trc :
-  forall v1 c1 v2 c2 c3,
-    trc step (v1, c1) (v2, c2) ->
-    trc step (v1, c1;;c3) (v2, c2;;c3).
-Proof.
-  intros v1 c1 v2 c2 c3 Hstep.
-  remember (v1, c1) as s1.
-  remember (v2, c2) as s2.
-  revert v1 c1 v2 c2 c3 Heqs1 Heqs2.
-  induction Hstep; intros v1 c1 v2 c2 c3 ? ?; subst.
-  - invc Heqs2. econstructor.
-  - destruct y as [v1' c1'].
-    specialize (IHHstep v1' c1' v2 c2 c3 eq_refl eq_refl).
-    eapply trc_front. apply StepSeqLStep. eauto. eauto.
-Qed.
-
-Inductive trc_backward {A} (R : A -> A -> Prop) : A -> A -> Prop :=
-| trcb_refl :
-    forall x,
-      trc_backward R x x
-| trcb_back :
-    forall x y z,
-      trc_backward R x y ->
-      R y z ->
-      trc_backward R x z.
-
-Lemma trc_back :
-  forall {A} (R : A -> A -> Prop) x y,
-    trc R x y ->
-    forall z,
-      R y z ->
-      trc R x z.
-Proof.
-  (* On HW3 *)
-Admitted.
-
-Lemma trcb_front :
-  forall {A} (R : A -> A -> Prop) y z,
-    trc_backward R y z ->
-    forall x,
-      R x y ->
-      trc_backward R x z.
-Proof.
-  (* Very similar to previous lemma. *)
-Admitted.
-
-Lemma trc_implies_trc_backward :
-  forall A (R : A -> A -> Prop) x y,
-    trc R x y ->
-    trc_backward R x y.
-Proof.
-  intros A R x y Htrc.
-  induction Htrc.
-  - constructor.
-  - eapply trcb_front; eauto.
-Qed.
-
-Lemma trc_backward_implies_trc :
-  forall A (R : A -> A -> Prop) x y,
-    trc_backward R x y ->
+Lemma trc_eq :
+  forall (A : Type) (R : A -> A -> Prop) x y,
+    x = y ->
     trc R x y.
 Proof.
-  intros A R x y Htrcb.
-  induction Htrcb.
-  - constructor.
-  - eapply trc_back; eauto.
+  intros A R x y H.
+  subst.
+  apply trc_refl.
 Qed.
 
-
-Lemma trc_reverse_ind :
-  forall A (R : A -> A -> Prop) (P : A -> A -> Prop),
-    (forall x, P x x) ->
-    (forall x y z, trc R x y -> R y z -> P x y -> P x z) ->
-    forall x y,
-      trc R x y ->
-      P x y.
+Lemma robot_horizontal_reachable :
+  forall x,
+    (x >= 0)%Z ->
+    reachable robot_sys (x, 5 - x)%Z.
 Proof.
-  intros A R P Hbase Hind x y H.
-  apply trc_implies_trc_backward in H.
-  induction H.
-  - apply Hbase.
-  - eapply Hind; eauto.
-    apply trc_backward_implies_trc.
-    auto.
-Qed.
-
-Definition loop_runs_to (e : arith) (c : cmd) (v1 v2 : valuation) :=
-  eval_arith e v1 <> 0 /\
-  trc step (v1, c) (v2, Skip).
-
-Ltac prepare_induct_step H :=
-  match type of H with
-  | step (?v, ?c) (?v', ?c') =>
-    let s := fresh "s" in
-    let Heqs := fresh "Heqs" in
-    let s' := fresh "s'" in
-    let Heqs' := fresh "Heqs'" in
-    remember (v, c) as s eqn:Heqs;
-    remember (v', c') as s' eqn:Heqs';
-    revert Heqs Heqs';
-    try revert c';
-    try revert v';
-    try revert c;
-    try revert v
-  end.
-
-Ltac induct_step H :=
-  prepare_induct_step H;
-  induction H; intros; subst.
-
-Ltac prepare_induct_trc_step H :=
-  match type of H with
-  | trc step (?v, ?c) (?v', ?c') =>
-    let s := fresh "s" in
-    let Heqs := fresh "Heqs" in
-    let s' := fresh "s'" in
-    let Heqs' := fresh "Heqs'" in
-    remember (v, c) as s eqn:Heqs;
-    remember (v', c') as s' eqn:Heqs';
-    revert Heqs Heqs';
-    try revert c';
-    try revert v';
-    try revert c;
-    try revert v
-  end.
-
-Ltac induct_trc_step H :=
-  prepare_induct_trc_step H;
-  induction H; intros; subst.
-
-Lemma decompose_while_execution :
-  forall v v' e c c',
-    trc step (v, while e loop c done) (v', c') ->
-    exists v1,
-      trc (loop_runs_to e c) v v1 /\
-      ((c' = Skip /\ v' = v1 /\ eval_arith e v' = 0) \/
-       (c' = (while e loop c done) /\ v' = v1) \/
-       (eval_arith e v1 <> 0 /\ exists c1', trc step (v1, c) (v', c1') /\ c' = (c1' ;; while e loop c done))).
-Proof.
-  intros v v' e c c' Htrc.
-  prepare_induct_trc_step Htrc.
-  revert e c.
-  induction Htrc using trc_reverse_ind; intros v e c v' c' ? ?; subst.
-  - invc Heqs'. (* eexists. split.
+  intros x Hle.
+  apply Zlt_lower_bound_ind with (z := 0%Z) (x := x); [|lia].
+  clear x Hle.
+  intros x IH Hx.
+  apply Zle_lt_or_eq in Hx.
+  destruct Hx as [Hx|Hx].
+  - specialize (IH (x - 1))%Z.
+    eapply reachable_transitive.
+    + apply IH. lia.
+    + eapply trc_front.
+      * apply robot_step_southeast.
+      * apply trc_eq.
+        f_equal; lia.
+  - subst x.
+    unfold reachable.
+    exists (0, 5)%Z.
+    simpl.
+    split.
+    + unfold robot_init. reflexivity.
     + apply trc_refl.
-    + auto.  *)
-    eauto 10 using trc_refl.
-  - destruct y as [v2 c2].
-    specialize (IHHtrc v e c v2 c2 eq_refl eq_refl).
-    destruct IHHtrc as [v1 [Htrc1 IH]].
-    destruct IH as [[? [? He]]|[[? ?]|[He [c1' [Hc ?]]]]]; subst.
-    + invc H.
-    + invc H.
-      * eexists. split; eauto.
-        right. right. split; auto.
-        eexists. split; eauto. constructor.
-      * eauto 10.
-    + invc H.
-      * eexists. split; eauto.
-        right. right. split; auto.
-        eexists. split; [|reflexivity].
-        eapply trc_back; eauto.
-      * exists v'. split.
-        -- eapply trc_back; eauto. split; auto.
-        -- auto.
 Qed.
 
-
-Fixpoint strength_reduction (e : arith) : arith :=
-  match e with
-  | Const _ => e
-  | Var _ => e
-  | Plus e1 e2 => Plus (strength_reduction e1) (strength_reduction e2)
-  | Minus e1 e2 => Minus (strength_reduction e1) (strength_reduction e2)
-  | Times (Const 2) e2 =>
-    let e2' := strength_reduction e2 in
-    Plus e2' e2'
-  | Times e1 e2 => Times (strength_reduction e1) (strength_reduction e2)
-  end.
-
-Fixpoint cmd_xform_arith (f : arith -> arith) (c : cmd) : cmd :=
-  match c with
-  | Skip => Skip
-  | Assign x e => Assign x (f e)
-  | Sequence c1 c2 => Sequence (cmd_xform_arith f c1) (cmd_xform_arith f c2)
-  | If e c1 c2 => If (f e) (cmd_xform_arith f c1) (cmd_xform_arith f c2)
-  | While e c => While (f e) (cmd_xform_arith f c)
-  end.
-
-Lemma cmd_xform_arith_equiv_step :
-  forall f,
-    (forall e v, eval_arith (f e) v = eval_arith e v) ->
-    forall v c v' c',
-      step (v, c) (v', c') ->
-      step (v, cmd_xform_arith f c) (v', cmd_xform_arith f c').
+Theorem robot_characterize_reachable :
+  forall s,
+    robot_reach s ->
+    reachable robot_sys s.
 Proof.
-  intros f Hf v c v' c' Hstep.
-  induct_step Hstep; invc Heqs; invc Heqs'; simpl; constructor;
-   try rewrite Hf; auto.
+  unfold robot_reach.
+  intros [x y] [Hxy Hx].
+  apply robot_horizontal_reachable in Hx.
+  eapply robot_vertical_reachable.
+  - eassumption.
+  - lia.
 Qed.
 
-Theorem cmd_xform_arith_equiv :
-  forall f,
-    (forall e v, eval_arith e v = eval_arith (f e) v) ->
-    forall v c v' c',
-      trc step (v, c) (v', c') ->
-      trc step (v, cmd_xform_arith f c) (v', cmd_xform_arith f c').
+Theorem robot_characterize_reachable_iff :
+  forall s,
+    reachable robot_sys s <-> robot_reach s.
 Proof.
-  intros f Hf v c v' c' Htrc.
-  induct_trc_step Htrc.
-  - invc Heqs'. constructor.
-  - destruct y as [v1 c1].
-    eapply cmd_xform_arith_equiv_step in H; eauto.
-    econstructor; eauto.
+  intros s.
+  split.
+  - intros Hreach.
+    eapply by_invariant; eauto.
+    apply robot_reach_invariant.
+  - apply robot_characterize_reachable.
 Qed.
 
-End Imp.
+End TrSys.
