@@ -64,10 +64,11 @@ Definition rev_tailrec {A : Set} (xs : list A) : list A :=
   rev_append xs nil.
 
 Lemma rev_append_rev :
-  forall (A : Set) (xs : list A) acc,
+  forall (A : Set) acc (xs : list A),
   rev_append xs acc = app (rev xs) acc. 
 Proof.
-  intros A xs.
+  intros A acc xs.
+  revert acc.
   induction xs as [|x l]; simpl.
   - intros acc. reflexivity.
   - intros acc1.
@@ -75,7 +76,7 @@ Proof.
   rewrite IHl.
   rewrite app_assoc.
   reflexivity.
-  Qed.
+Qed.
 
 (* rev_tailrec is equivalent to rev *)
 Theorem rev_tailrec_equiv_rev :
@@ -83,5 +84,8 @@ Theorem rev_tailrec_equiv_rev :
     rev_tailrec l = rev l.
 Proof.
   intros A l.
-
-  
+  unfold rev_tailrec.
+  rewrite rev_append_rev.
+  rewrite app_nil_r.
+  reflexivity.
+Qed.  
