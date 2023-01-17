@@ -88,7 +88,7 @@ $$
 Now we can see that our two programs above, while not syntactically equal, do *evaluate* to the same thing:
 $$
 \begin{align}
-\[\\![ \texttt{Plus (Const 1) (Const 2)} ]\\!] &= \[\\![ \texttt{Const 1} ]\\!] + \[\\![ \texttt{Const 1} ]\\!] \\\\
+\[\\![ \texttt{Plus (Const 1) (Const 1)} ]\\!] &= \[\\![ \texttt{Const 1} ]\\!] + \[\\![ \texttt{Const 1} ]\\!] \\\\
 &= 1 + 1 \\\\
 &= 2 \\\\
 \[\\![ \texttt{Const 2} ]\\!] &= 2
