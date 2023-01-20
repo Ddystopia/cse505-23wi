@@ -125,6 +125,18 @@ Compute has_zero ("x" + "y")%arith. (* false *)
 Compute has_zero ("x" + "y" - 0)%arith. (* true *)
 
 (* memory *)
+
+
+Fail Fixpoint eval_arith (e: arith) : nat :=
+  match e with
+  | Const n => n
+  | Var x => (* OH NO! *) "value_of x in the current memory"
+  | Plus e1 e2 => eval_arith e1 + eval_arith e2
+  | Minus e1 e2 => eval_arith e1 + eval_arith e2
+  | Times e1 e2 => eval_arith e1 + eval_arith e2
+  end.
+
+
 Definition valuation := list (var * nat).
 
 Fixpoint lookup (x : var) (v : valuation) : option nat :=
@@ -156,7 +168,9 @@ Lemma eval_one_plus_one_is_eval_two :
   forall v,
     eval_arith (1 + 1)%arith v = eval_arith 2 v.
 Proof.
-Admitted.
+  simpl. auto.
+Qed.
+
 
 
 (* from expressions to commands *)
@@ -166,7 +180,7 @@ Inductive cmd :=
 | Sequence (c1 c2 : cmd)
 | Repeat (e : arith) (body : cmd).
 
-Fixpoint do_n_times {A} (f : A -> A) (n : nat) (x : A) : A :=
+Fixpoint do_n_times {A} (f : A -> A) (n : nat) (x : A): A :=
   match n with
   | O => x
   | S n' => do_n_times f n' (f x)
@@ -179,7 +193,14 @@ Fixpoint eval_cmd (c : cmd) (v : valuation) : valuation :=
   | Skip => v
   | Assign x e => (x, eval_arith e v) :: v
   | Sequence c1 c2 => eval_cmd c2 (eval_cmd c1 v)
-  | Repeat e body => do_n_times (eval_cmd body) (eval_arith e v) v
+  | Repeat e body =>
+      (* let k := eval_arith e v in
+      if Nat.eqb k 0 then
+        v
+      else
+        (* eval_cmd (Sequence body (Repeat (Const (pred k)) body)) v *)
+        eval_cmd (Repeat (Const (pred k)) body) (eval_cmd body v) *)
+      do_n_times (eval_cmd body) (eval_arith e v) v
   end.
 
 (* more notation *)
@@ -207,6 +228,42 @@ Definition factorial : cmd :=
     "input" <- "input" - 1
   done.
 
+Print factorial.
+
+Fixpoint fact (n : nat) : nat :=
+  match n with
+  | 0 => 1
+  | S n' => n * fact n'
+  end.
+
+Theorem factorial_correct :
+  (*correct factorial.
+
+  for all inputs, the output gets assigned the value of factorial
+*)
+  forall v n ,
+    lookup "input" v = Some n -> 
+    lookup  "output" (eval_cmd factorial v) = Some (fact n).
+Proof.
+  intros. 
+  unfold factorial.
+
+(* ("output", 1) :: v *)
+
+(* what is the state of memory after
+   k iterations of the loop body? *)
+(*
+   ("output", 1) :: v
+   ("input", n-1) :: ("output", n) :: ("output", 1) :: v
+   ("input", n-2) :: ("output", n * (n-1)) :: ("input", n-1) :: ("output", n) :: ("output", 1) :: v
+*)
+
+Abort.
+
+
+
+
+
 Definition factorial_loop_body : cmd :=
   "output" <- "output" * "input";
   "input" <- "input" - 1.
@@ -224,18 +281,19 @@ Proof.
   (* do_n_times (eval_cmd factorial_loop_body) *)
 Abort.
 
-Definition map_equiv m1 m2 := forall v, lookup v m1 = lookup v m2.
-
+Definition map_equiv m1 m2 := forall x, lookup x m1 = lookup x m2.
+Ltac solve_map_cases :=
+  unfold map_equiv; intros; simpl;
+  repeat destruct (var_eq _ _); try congruence.
 Example map_equiv_example :
   forall m,
     map_equiv (("x", 0) :: ("y", 1) :: m) (("y", 1) :: ("x", 0) :: m).
 Proof.
   (* example of destructing on a non-variable *)
-Admitted.
+  solve_map_cases.
+  Qed.
 
-Ltac solve_map_cases :=
-  unfold map_equiv; intros; simpl;
-  repeat destruct (var_eq _ _); try congruence.
+
 
 (* key lemma for factorial *)
 Lemma factorial_loop_body_ok :
@@ -244,14 +302,15 @@ Lemma factorial_loop_body_ok :
     lookup "output" v = Some acc ->
     map_equiv
       (do_n_times (eval_cmd factorial_loop_body) n v)
-      (("input", 0) :: ("output", factorial_tr n acc) :: v).
+      (("input", 0) :: ("output", fact n * acc) :: v).
 Proof.
   (* do_n_times is recursive on n. So is factorial_tr. Let's induct on n. *)
   induction n; intros acc v Hinput Houtput x.
-  - simpl. solve_map_cases.
-  - cbn [do_n_times factorial_tr].
+  - simpl. solve_map_cases. subst.  rewrite Houtput. f_equal. lia.
+  - cbn [do_n_times fact].
     unfold map_equiv in *.
     rewrite IHn with (acc := S n * acc); solve_map_cases.
+    + f_equal. lia.
     + rewrite Hinput. f_equal. lia.
     + rewrite Hinput, Houtput. f_equal. lia.
 Qed.
@@ -259,14 +318,15 @@ Qed.
 Theorem factorial_ok :
   forall v input,
     lookup "input" v = Some input ->
-    lookup "output" (eval_cmd factorial v) = Some (factorial_tailrec input).
+    lookup "output" (eval_cmd factorial v) = Some (fact input).
 Proof.
   intros v input Hinput.
-  unfold factorial, factorial_tailrec.
+  unfold factorial.
   fold factorial_loop_body.
   cbn -[factorial_loop_body].
   rewrite Hinput.
   rewrite factorial_loop_body_ok with (acc := 1); solve_map_cases.
+  f_equal. lia.
 Qed.
 
 End Interpreters.
