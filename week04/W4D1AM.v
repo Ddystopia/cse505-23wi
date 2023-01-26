@@ -278,6 +278,11 @@ Definition two_counters_state : Type := nat * nat.
 Definition two_counters_init (input : nat) (s : two_counters_state) : Prop :=
   s = (0, input).
 
+(*
+Definition two_counters_step (s1 s2 : two_counters_state) : Prop :=
+  ...
+*)
+
 Inductive two_counters_step :
     two_counters_state -> two_counters_state -> Prop :=
 | two_counters_step_step :
@@ -303,6 +308,7 @@ Theorem two_counters_safe_invariant :
   forall input,
     is_invariant (two_counters_sys input) (two_counters_safe input).
 Proof.
+
 Abort.
 
 (* step back and strengthen! *)
@@ -310,11 +316,43 @@ Definition two_counters_inv (input : nat) (s : two_counters_state) : Prop :=
   let (x, y) := s in
   x + y = input.
 
+  Ltac unfold_predicate P :=
+  match P with
+  | ?head _ => unfold_predicate head
+  | _ => try unfold P
+  end.
+
+  Ltac invariant_induction_boilerplate :=
+    intros;
+    apply invariant_induction; [
+      unfold initially_holds; simpl;
+      match goal with
+      | [ |- forall _, ?P _ -> ?Q _ ] =>
+        unfold_predicate P;
+        unfold_predicate Q;
+        intros s Hinit;
+        try subst
+      end
+    |
+      unfold closed_under_step; simpl;
+      match goal with
+      | [ |- forall _, ?P _ -> forall _, ?Q _ _ -> _ ] =>
+        unfold_predicate P;
+        unfold_predicate Q;
+        intros s1 IH s2 Hstep;
+        try inversion Hstep;
+        try subst
+      end
+    ].
+
 Lemma two_counters_inv_invariant :
   forall input,
     is_invariant (two_counters_sys input) (two_counters_inv input).
 Proof.
-  intros input.
+  invariant_induction_boilerplate; lia.
+  Restart.
+
+
   apply invariant_induction.
   - unfold initially_holds. simpl.
     unfold two_counters_init, two_counters_inv.
@@ -323,7 +361,7 @@ Proof.
     reflexivity.
   - unfold closed_under_step. simpl.
     unfold two_counters_inv.
-    intros [x1 y1] IH [x2 y2] Hstep.
+    intros [x1 y1] IH [x2 y2] Hstep. 
     inversion Hstep; subst.
     lia.
 Qed.
