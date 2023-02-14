@@ -711,7 +711,7 @@ Proof.
   firstorder.
 Qed.
 
-Lemma step_closed :
+Lemma closed_preservation :
   forall e e',
     e --> e' ->
     closed e ->
@@ -724,6 +724,30 @@ Proof.
   eauto using closed_subst.
 Qed.
 
+Definition unstuck e :=
+  value e \/ exists e', e --> e'.
+
+Lemma closed_progress :
+  forall e,
+    closed e ->
+    unstuck e.
+Proof.
+  unfold unstuck.
+  induction e; intros.
+  - specialize (H s). simpl in *. congruence.
+  - left. constructor.
+  - right. apply closed_app_invert in H. destruct H as [H1 H2].
+    specialize (IHe1 H1).
+    destruct IHe1 as [IHe1|IHe1].
+    + specialize (IHe2 H2).
+      destruct IHe2 as [IHe2|IHe2].
+      * invc IHe1. eexists. constructor. auto.
+      * destruct IHe2 as [e' Hstep'].
+        eexists. eapply step_app_right. eauto. eauto.
+    + destruct IHe1 as [e' Hstep'].
+      eexists. eapply step_app_left. eauto.
+Qed.
+
 Definition expr_init (e : expr) (e' : expr) :=
   e' = e.
 
@@ -732,7 +756,7 @@ Definition expr_to_trsys (e : expr) := {|
   Step := step
 |}.
 
-Theorem step_star_closed :
+Theorem closed_invariant :
   forall e,
     closed e ->
     is_invariant (expr_to_trsys e) closed.
@@ -742,7 +766,18 @@ Proof.
   - unfold initially_holds. simpl.
     unfold expr_init. intros. subst. auto.
   - unfold closed_under_step. simpl.
-    eauto using step_closed.
+    eauto using closed_preservation.
+Qed.
+
+Theorem scope_safety :
+  forall e,
+    closed e ->
+    is_invariant (expr_to_trsys e) unstuck.
+Proof.
+  intros e HC.
+  apply invariant_implies with (P := closed).
+  - apply closed_invariant. auto.
+  - intros. apply closed_progress. auto.
 Qed.
 
 Lemma run_for_n_steps_step_star :
