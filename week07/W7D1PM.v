@@ -119,6 +119,7 @@ Infix "@" := App (left associativity, at level 68).
 Delimit Scope utlc_scope with expr.
 Bind Scope utlc_scope with expr.
 
+(*   e[from |-> to]     *)
 Fixpoint subst (from : var) (to : expr) (e : expr) : expr :=
   match e with
   | Var x => if var_eq from x then to else e
@@ -156,6 +157,26 @@ Definition Id := \"x", "x".
 Example eval_identity :
   Id @ (\"y", "z") --> (\"y", "z").
 Proof.
+  unfold Id.
+
+Compute (subst "x" (\"y","z") (Var "x")).
+
+(* 0 + n = n
+
+reflexivity.
+*)
+
+
+
+
+apply step_beta.
+  apply value_abs.
+
+  Restart.
+  unfold Id.
+  constructor.
+  constructor.
+Restart.
   repeat econstructor.
 Qed.
 
