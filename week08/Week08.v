@@ -518,7 +518,7 @@ Proof.
     + invc H. auto.
     + simpl in *. destruct var_eq; congruence.
   - constructor.
-    apply IHHe with (t3 := if var_eq x x0 then t1 else t3); auto.
+    apply IHHe with (t1 := if var_eq x x0 then t1 else t3); auto.
     simpl.
     destruct var_eq; auto.
 Qed.
