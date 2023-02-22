@@ -534,7 +534,7 @@ Lemma substitution :
   forall (G : ctx) e t x t1 v,
     G ++ [(x, t1)] |- e : t ->
     lookup x G = None ->
-    [] |- v : t1->
+    [] |- v : t1 ->
     G |- subst x v e : t.
 Proof.
   intros G e t x t1 v He Hlook Hv.
@@ -564,7 +564,7 @@ Qed.
 Lemma substitution_one :
   forall x t1 e t v,
     [(x, t1)] |- e : t ->
-    [] |- v : t1->
+    [] |- v : t1 ->
     [] |- subst x v e : t.
 Proof.
   intros x t1 e t v He Hv.
@@ -596,8 +596,10 @@ Proof.
   intros e e' t HT Step.
   revert t HT.
   induction Step; intros t HT; invc HT; eauto.
+  idtac.
   (* only the case for step_beta remains *)
   invc H3.
+  idtac.
   eauto using substitution_one.
 Qed.
 
@@ -616,7 +618,8 @@ Lemma preservation_star :
     [] |- e : t ->
     is_invariant (expr_to_trsys e) (closed_expr_of_type t).
 Proof.
-  invariant_induction_boilerplate;
+  invariant_induction_boilerplate.
+  assumption.
   eauto using preservation.
 Qed.
 
