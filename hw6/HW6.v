@@ -334,7 +334,7 @@ End STLC_with_annotations.
 Syntax
 
 The syntax of types and terms is similar to what is used in the slides and in
-Week08.v.
+Week09.v.
 
 Syntax of types
   - built-in boolean type is written "bool"
@@ -443,7 +443,7 @@ file to turn it in.
  *    of x. Note that "pred zero" should be "zero" by definition. Write a test
  *    to show "pred" is working.
  *
- *    Hint: Use the same "pair trick" we used in UTLC. See slide 55 from Week 8.
+ *    Hint: Use the same "pair trick" we used in UTLC. See slide 55 from Week 9.
  *
  *    Hint: The type "Pair Nat Nat" will be useful.
  *)
@@ -625,7 +625,7 @@ file to turn it in.
  *
  *     fst t1 t2 (mkpair t1 t2 v1 v2) -->* v1
  *
- * Hint: The definitions of fst and mkpair are on slide 55 of the Week 8 slides.
+ * Hint: The definitions of fst and mkpair are on slide 55 of the Week 9 slides.
  *
  * Hint: Treat the definitions of fst and mkpair as "abbreviations", which you
  * expand to their right-hand sides before starting to step.
