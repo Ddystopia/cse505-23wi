@@ -4,3 +4,14 @@
 #.vscode/
 
 notes-web/public
+
+*.aux
+*.glob
+*.vo
+*.vok
+*.vos
+.*.aux
+.*.glob
+.*.vo
+.*.vok
+.*.vos

@@ -971,20 +971,20 @@ Lemma separate_sum_tr:
   forall l a, a + sum_list l = sum_list_tr l a.
 Proof.
   induction l as [| head tail IH]; intro; simpl; auto.
-  - rewrite <- IH.
-    rewrite Nat.add_assoc.
-    rewrite <- (Nat.add_comm _ a).
-    reflexivity.
+
+  rewrite <- IH.
+  rewrite Nat.add_assoc.
+  rewrite <- (Nat.add_comm _ a).
+  reflexivity.
 Qed.
 
 Lemma separate_sum_tr_2:
   forall l a b, sum_list_tr l (a + b) = a + sum_list_tr l b.
 Proof.
-  intros.
-  rewrite <- separate_sum_tr.
-  rewrite <- separate_sum_tr.
-  rewrite Nat.add_assoc.
-  reflexivity.
+  induction l as [| head tail IH]; intros; auto.
+  simpl.
+  repeat rewrite IH.
+  lia.
 Qed.
 
 Theorem sum_list_tailrec_ok : forall l,
