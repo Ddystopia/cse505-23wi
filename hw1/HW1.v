@@ -82,7 +82,10 @@ Definition andb (b1 : bool) (b2 : bool) : bool :=
  * Hint: Kinda like `andb`, but different.
  *)
 Definition orb (b1 : bool) (b2 : bool) : bool :=
-  false. (* YOUR CODE HERE *)
+  match b1 with
+  | true => true
+  | false => b2
+  end.
 
 
 (*
@@ -106,8 +109,8 @@ Lemma orb_comm :
   forall b1 b2,
     orb b1 b2 = orb b2 b1.
 Proof.
-  (* YOUR CODE HERE *)
-Admitted. (* Change to Qed when done *)
+  destruct b1; destruct b2; reflexivity.
+Qed. (* Change to Qed when done *)
 
 
 (*
@@ -121,8 +124,8 @@ Lemma notb_andb_is_orb_notb :
   forall b1 b2,
     notb (andb b1 b2) = orb (notb b1) (notb b2).
 Proof.
-  (* YOUR CODE HERE *)
-Admitted. (* Change to Qed when done *)
+  destruct b1; destruct b2; reflexivity.
+Qed. (* Change to Qed when done *)
 
 
 (* --- Natural numbers practice --- *)
@@ -153,8 +156,8 @@ Lemma add_S_n :
   forall n1 n2,
     add (S n1) n2 = S (add n1 n2).
 Proof.
-  (* YOUR CODE HERE *)
-Admitted. (* Change to Qed when done *)
+  destruct n1; intros; simpl; reflexivity.
+Qed. (* Change to Qed when done *)
 
 
 (*
@@ -177,6 +180,17 @@ Lemma add_n_S :
 Proof.
 Abort.
   (* YOUR EXPLANATION HERE (no need to prove it yet!) *)
+(*
+ * It is different in that previous one could have been directly destructed
+ * because (S n1) was directly in match. But now it should be more difficult.
+ *)
+
+Lemma eq_S:
+  forall n1 n2, n1 = n2 -> S n1 = S n2.
+Proof.
+  intros.
+  destruct n1; rewrite H; reflexivity.
+Qed.
 
 
 (*
@@ -192,8 +206,37 @@ Lemma add_n_S :
   forall n1 n2,
     add n1 (S n2) = S (add n1 n2).
 Proof.
-  (* YOUR CODE HERE *)
-Admitted. (* Change to Qed when done *)
+  induction n1; intros; simpl.
+  - reflexivity.
+  - apply eq_S.
+    rewrite IHn1.
+    reflexivity.
+Qed. (* Change to Qed when done *)
+
+Lemma add_0_n :
+    forall n : nat,
+        add O n = n.
+Proof.
+    intro n.
+    simpl.
+    reflexivity.
+Qed.
+
+Lemma add_n_0 :
+    forall n : nat,
+        add n O = n.
+Proof.
+    intro n.
+    induction n as [| p IHp].
+    - auto.
+    - simpl.
+    (*
+     f_equal. assumption.
+    *)
+     rewrite IHp.
+     reflexivity.
+Qed.
+
 
 
 (*
@@ -211,8 +254,12 @@ Lemma add_comm :
   forall n1 n2,
     add n1 n2 = add n2 n1.
 Proof.
-  (* YOUR CODE HERE *)
-Admitted. (* Change to Qed when done *)
+  intros.
+  induction n1.
+  - rewrite add_0_n; rewrite add_n_0; reflexivity.
+  - rewrite add_n_S; rewrite add_S_n; apply eq_S.
+    apply IHn1.
+Qed. (* Change to Qed when done *)
 
 (*
  * PROBLEM 9 [3 points, ~3 sentences]
